@@ -1,0 +1,9 @@
+{
+    "mode": "sql",
+    "db": {
+      "host": "localhost",
+      "user": "your_username",
+      "dbName": "your_database_name",
+      "password": "your_password"
+    }
+}
