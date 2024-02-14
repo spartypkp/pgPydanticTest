@@ -1,9 +1,18 @@
 {
-    "mode": "sql",
-    "db": {
-      "host": "localhost",
-      "user": "your_username",
-      "dbName": "your_database_name",
-      "password": "your_password"
+  "transforms": [
+    {
+      "mode": "ts",
+      "include": "**/*.ts",
+      "emitTemplate": "{{dir}}/{{name}}_models.py"
     }
+  ],
+  "srcDir": "./src/",
+  "failOnError": false,
+  "camelCaseColumnNames": false,
+  "db": {
+    "host": "localhost",
+    "user": "s",
+    "dbName": "s",
+    "password": ""
+  }
 }
