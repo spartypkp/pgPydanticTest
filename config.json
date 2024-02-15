@@ -6,7 +6,7 @@
       "emitTemplate": "{{dir}}/{{name}}_models.py"
     }
   ],
-  "srcDir": "./src/",
+  "srcDir": "./",
   "failOnError": false,
   "camelCaseColumnNames": false,
   "db": {
