@@ -40,12 +40,11 @@ class SQLTransformer(cst.CSTTransformer):
 
 
             # Combine the function name comment and the SQL query
-            sql_named_query = f"""
-            import {{ sql }} from '@pgtyped/runtime';
+            sql_named_query = f"""import {{ sql }} from '@pgtyped-pydantic/runtime';
 
-            // Welcome to the worst hack of all time
+// Welcome to the worst hack of all time
 
-            const {function_name} =sql`\n{sql_query}`;\n\n"""
+const {function_name} =sql`\n{sql_query}`;\n\n"""
 
             with open(ts_filename, "w") as f:
                 f.write(sql_named_query)
@@ -69,7 +68,7 @@ class SQLTransformer(cst.CSTTransformer):
             # print(last_error_line)
 
             # DEBUGGING SUBPROCESS
-            process = subprocess.Popen(['npx', 'pgtyped', '-c', cfg, '-f', file_override], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            process = subprocess.Popen(['npx', 'pgtyped-pydantic', '-c', cfg, '-f', file_override], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
 
             # Print the output in real-time
             for line in process.stdout:
@@ -80,6 +79,9 @@ class SQLTransformer(cst.CSTTransformer):
 
             if exit_code != 0:
                 print(f"Process exited with code {exit_code}")
+            for line in process.stderr:
+                print(line.decode().strip())
+            
             new_args = list(node.args)
             new_args[0] = cst.Arg(value=cst.SimpleString(f'"processed!"'))
 

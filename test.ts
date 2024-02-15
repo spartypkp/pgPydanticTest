@@ -1,8 +1,7 @@
+import { sql } from '@pgtyped-pydantic/runtime';
 
-            import { sql } from '@pgtyped/runtime';
+// Welcome to the worst hack of all time
 
-            // Welcome to the worst hack of all time
-
-            const SELECTSAMPLES =sql`
-SELECT * FROM samples`;
+const selectNodes =sql`
+SELECT * FROM template_node`;
 

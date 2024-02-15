@@ -1,5 +1,5 @@
 result = sql(
- """SELECT * FROM samples""", "SELECTSAMPLES")
+ """SELECT * FROM template_node""", "selectNodes")
 print(result)
 
 
