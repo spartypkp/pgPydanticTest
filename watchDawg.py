@@ -14,13 +14,17 @@ from libcst.metadata import ParentNodeProvider
 import psycopg
 from psycopg.types.json import Jsonb
 from psycopg.rows import class_row, dict_row
-from typing import List, Any, Optional, TypeVar, Callable
+from typing import List, Any, Optional, TypeVar, Callable, Union
 import pydantic
-
+import logging
+import os
+DIR = os.path.dirname(os.path.realpath(__file__))
+parent = os.path.dirname(DIR)
+sys.path.append(parent)
 
 
 # ================================= WATCHDOG ========================================
-
+LOGGER = None
 class PyFileEventHandler(FileSystemEventHandler):
     def __init__(self, queue):
         self.queue = queue
@@ -48,7 +52,7 @@ def worker(queue):
         try:
             apply_codemod_to_file(event.src_path)
         except Exception as e:
-            print("Watchdog error!", e)
+            LOGGER.info(f"Error watching file: {event.src_path}. Error: {e}")
         
         queue.task_done()
 
@@ -74,7 +78,7 @@ def start_watching(path):
     worker_thread.join()
 
 
-# Credit to SeanGrove for the original version of this codemod
+# Credit to SeanGrove for the original version of this codemod, G.O.A.T.
 # ================================= CODE MOD ========================================
 class SQLTransformer(cst.CSTTransformer):
 
@@ -85,14 +89,16 @@ class SQLTransformer(cst.CSTTransformer):
         self.pydantic_models_to_write = []
         self.extracted_sql_strings = []
         self.extracted_function_names = []
+        LOGGER.info(f"Initializing SQLTransformer with filename: {filename}")
 
     def leave_Call(self, node: cst.Call, updated_node: cst.Call):
         if isinstance(node.func, cst.Name) and node.func.value == "sql":
-
-            print(len(node.args))
-            print(node.args[0])
-            print(node.args[1])
-            print(type(node.args[1]))
+            
+            
+            #print(len(node.args))
+            #print(node.args[0])
+            #print(node.args[1])
+            #print(type(node.args[1]))
 
             # Check if the second argument type is already cst.Name, if so, return
             if isinstance(node.args[1], cst.Name):
@@ -106,6 +112,7 @@ class SQLTransformer(cst.CSTTransformer):
             
             first_arg = node.args[0].value
             second_arg = node.args[1].value
+            LOGGER.info(f"Found sql call:\n -{node.args[0].value}")
 
             # Not true, cst.Name is indication of processing having already occured. Well, this
             # was true when you coded this. I changed it because fuck it
@@ -164,7 +171,7 @@ const {function_name} =sql`\n{sql_query}`;\n\n"""
             # Add my own custom function call, which will be used to ACTUALLY run the query.
             #print(f"Generated file:\n{generated_file}")
             function_call = f"""\nfrom apply_codemod import pydantic_insert, pydantic_select, pydantic_update
-def {function_name}(params: {function_name}Params) -> Optional[List[{function_name}Result]]:
+def {function_name}(params: {function_name}Params) -> Union[List[{second_arg.value}Result], None]:
     return True # Will figure this out later\n\n
 """
             generated_file = generated_file +  function_call
@@ -199,15 +206,38 @@ def {function_name}(params: {function_name}Params) -> Optional[List[{function_na
             and updated_node.value.func.value == "sql"
         ):
             second_arg = updated_node.value.args[1].value
-            # {second_arg.value}
             
-            constructed_annotation = f"Union[List[{second_arg.value}Result], None]"
+            # Doesn't work. Used to work when only a Pydantic Type
+            #constructed_annotation = f"Union[List[{second_arg.value}Result], None]"
+
+            # Maybe I was too hasty when I removed Sean's old code here
+            
+            constructed_annotation = cst.Annotation(
+                annotation=cst.Subscript(
+                    value=cst.Name(value="Union"),
+                    slice=[
+                        cst.SubscriptElement(
+                            slice=cst.Index(
+                                value=cst.Subscript(
+                                    value=cst.Name(value="List"),
+                                    slice=[
+                                        cst.SubscriptElement(
+                                            slice=cst.Index(value=cst.Name(value=f"{second_arg.value}Result"))
+                                        )
+                                    ],
+                                )
+                            )
+                        ),
+                        cst.SubscriptElement(slice=cst.Index(value=cst.Name(value="None"))),
+                    ],
+                )
+            )
     
-            new_annotation = cst.Annotation(annotation=cst.Name(constructed_annotation))
+            
            
             return cst.AnnAssign(
                 target=updated_node.targets[0].target,
-                annotation=new_annotation,
+                annotation=constructed_annotation,
                 value=updated_node.value,
                 equal=cst.AssignEqual(),
             )
@@ -270,6 +300,7 @@ def apply_codemod_to_file(filename: str):
 
 
 
+# ================================= UTILITY FUNCTIONS ========================================
 
 # My personal psycopg functions, which I want to use :)
 # For now I'm going to directly execute SQL satements using psycopg3. A more nuanced approach
@@ -415,6 +446,42 @@ def sql(query: str, func: T) -> T:
     
     return rows
 
+def create_logger(verbose=False):
+    global LOGGER
+    # Ensure the logs directory exists
+    os.makedirs(os.path.join(DIR, 'logs'), exist_ok=True)
+
+    # Create or get the LOGGER
+    LOGGER = logging.getLogger("watchDawg")
+
+    # Optionally clear existing handlers to prevent duplicate messages
+    LOGGER.handlers = []
+
+    # Set the logging level
+    LOGGER.setLevel(logging.DEBUG)
+
+    # Create handlers (file and console)
+    file_handler = logging.FileHandler(f"{DIR}/logs/watchDawg.log", mode="w")
+
+    # Create a logging format
+    formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s (%(filename)s:%(lineno)d)')
+    file_handler.setFormatter(formatter)
+
+    # Add file handler to the LOGGER
+    LOGGER.addHandler(file_handler)
+
+    console_handler = logging.StreamHandler(sys.stdout)
+    console_handler.setFormatter(formatter)
+    console_handler.setLevel(logging.INFO)
+    console_handler.filter(lambda record: record.levelno >= logging.INFO)
+    if verbose:
+        # Create console handler with a higher log level
+        console_handler.setLevel(logging.DEBUG)
+        console_handler.filter(lambda record: record.levelno >= logging.DEBUG)
+
+    # Add console handler to the LOGGER
+    LOGGER.addHandler(console_handler)
+    LOGGER.info("Logger Created")
 
 
 
@@ -423,5 +490,8 @@ if __name__ == "__main__":
         config = json.load(f)
     f.close()
     srcDir = config['srcDir']
+    LOGGER = create_logger(verbose=True)
     
+    LOGGER.info(f"Starting watchDawg program.")
+    LOGGER.debug(f"srcDir: {srcDir}")
     start_watching(srcDir)
