@@ -75,6 +75,9 @@ const {function_name} =sql`\n{sql_query}`;\n\n"""
             command = ['npx', 'pgtyped-pydantic', '-c', cfg, '-f', file_override]
             process = subprocess.run(command, capture_output=True)
             
+            # Print out the stdout and stderr
+            print(f"stdout: {process.stdout.decode('utf-8')}")
+            print(f"stderr: {process.stderr.decode('utf-8')}")
             # result.stderr contains the stderr output
             generated_file = process.stdout.decode('utf-8').replace("\"DISGUSTING_test_HACK.ts\"", self.filename)
             

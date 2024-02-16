@@ -1,7 +1,7 @@
 
 
 result = sql(
- """SELECT * FROM template_node""", "selectNodes")
+ """SELECT * FROM us_federal_ecfr""", "selectNodes")
 print(result)
 
 

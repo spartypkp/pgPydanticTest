@@ -11,8 +11,8 @@
   "camelCaseColumnNames": false,
   "db": {
     "host": "localhost",
-    "user": "willdiamond",
-    "dbName": "legality",
+    "user": "s",
+    "dbName": "s",
     "password": ""
   }
 }
