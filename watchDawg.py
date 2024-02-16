@@ -17,7 +17,7 @@ from psycopg.rows import class_row, dict_row
 from typing import List, Any, Optional
 import pydantic
 
-# Credit to SeanGrove for the original version of this codemod
+
 # ================================= WATCHDOG ========================================
 
 class PyFileEventHandler(FileSystemEventHandler):
@@ -70,7 +70,7 @@ def start_watching(path):
     worker_thread.join()
 
 
-
+# Credit to SeanGrove for the original version of this codemod
 # ================================= CODE MOD ========================================
 class SQLTransformer(cst.CSTTransformer):
 
@@ -95,7 +95,7 @@ class SQLTransformer(cst.CSTTransformer):
                 return updated_node
 
 
-            print("Found sql call")
+            #print("Found sql call")
             if len(node.args) < 2:
                 raise ValueError("The sql function must have two string arguments.")
             
@@ -109,8 +109,8 @@ class SQLTransformer(cst.CSTTransformer):
             #     raise ValueError("Both arguments to sql must be strings.")
             
 
-            print(f"First argument to sql: {first_arg.value}")
-            print(f"Second argument to sql: {second_arg.value}")
+            #print(f"First argument to sql: {first_arg.value}")
+            #print(f"Second argument to sql: {second_arg.value}")
 
             
             
@@ -132,7 +132,7 @@ const {function_name} =sql`\n{sql_query}`;\n\n"""
             # Don't look at this hack either
             with open(ts_filename, "w") as f:
                 f.write(sql_named_query)
-            print(f"Writing SQL to {ts_filename}")
+            #print(f"Writing SQL to {ts_filename}")
             f.close()
 
             # Define cli args
@@ -144,8 +144,8 @@ const {function_name} =sql`\n{sql_query}`;\n\n"""
             process = subprocess.run(command, capture_output=True)
             
             # Print out the stdout and stderr
-            print(f"stdout: {process.stdout.decode('utf-8')}")
-            print(f"stderr: {process.stderr.decode('utf-8')}")
+            #print(f"stdout: {process.stdout.decode('utf-8')}")
+            #print(f"stderr: {process.stderr.decode('utf-8')}")
             # result.stderr contains the stderr output
             generated_file = process.stdout.decode('utf-8').replace("\"DISGUSTING_test_HACK.ts\"", self.filename)
             
@@ -157,7 +157,7 @@ const {function_name} =sql`\n{sql_query}`;\n\n"""
             self.extracted_function_names.append(function_name)
             
             # Add my own custom function call, which will be used to ACTUALLY run the query.
-            print(f"Generated file:\n{generated_file}")
+            #print(f"Generated file:\n{generated_file}")
             function_call = f"""\nfrom apply_codemod import pydantic_insert, pydantic_select, pydantic_update
 def {function_name}(params: {function_name}Params) -> {function_name}Result:
     return True # Will figure this out later\n\n
@@ -205,8 +205,15 @@ def {function_name}(params: {function_name}Params) -> {function_name}Result:
     def leave_Module(self, original_node: cst.Module, updated_node: cst.Module) -> cst.Module:
         new_imports = []  # List to hold new import nodes
 
+        # Check if the file has already been processed
+
+        
+        
+
+
         for i in range(len(self.extracted_sql_strings)):
             function_name = self.extracted_function_names[i]
+            
             new_import = cst.ImportFrom(
                 module=cst.Name("test_models"),
                 names=[
@@ -215,14 +222,22 @@ def {function_name}(params: {function_name}Params) -> {function_name}Result:
                     cst.ImportAlias(name=cst.Name(f"{function_name}")),
                 ],
             )
-            with open(f'{self.filename_without_extension}_models.py', 'w') as f:
-                f.write(self.pydantic_models_to_write[i])
+            
             new_imports.append(new_import)  # Add new import node to the list
+
+        # If nothing was added, return the original node
+        if len(new_imports) == 0:
+            return original_node
+        
+
+        with open(f'{self.filename_without_extension}_models.py', 'w') as f:
+            f.write("\n".join(self.pydantic_models_to_write))
+
 
         # Add a newline after the imports
         new_imports.append(cst.EmptyLine())
         
-
+        
         # Create a new Module node with the new imports and the original body
         return cst.Module(header=[], body=new_imports + list(updated_node.body))
        
