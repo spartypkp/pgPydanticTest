@@ -1,16 +1,10 @@
-from test_models import SelectNodesParams, SelectNodesResult, SelectNodesfrom test_models import SelectNodesAgainParams, SelectNodesAgainResult, SelectNodesAgain
-from test_models import SelectNodesParams, SelectNodesResult, SelectNodes
-
-
-
+from test_models import SelectRowsParams, SelectRowsResult, SelectRows
+from watchdog import sql
 
 def main():
     print("File for testing pgtyped-pydantic")
 
-    result: SelectNodesResult = sql(
-    """SELECT * FROM us_federal_ecfr""", SelectNodes)
-
-    result: SelectNodesAgainResult = sql("""SELECT * FROM us_federal_ecfr""", SelectNodesAgain)
+    result: SelectRowsResult = sql("SELECT * FROM us_federal_ecfr;", SelectRows) # This should work. d
     
     print(result) 
 

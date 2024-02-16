@@ -14,8 +14,9 @@ from libcst.metadata import ParentNodeProvider
 import psycopg
 from psycopg.types.json import Jsonb
 from psycopg.rows import class_row, dict_row
-from typing import List, Any, Optional
+from typing import List, Any, Optional, TypeVar, Callable
 import pydantic
+
 
 
 # ================================= WATCHDOG ========================================
@@ -44,7 +45,10 @@ def worker(queue):
         print(f"Detected change in: {event.src_path}")
 
         # Call apply_codemod.py with the detected filename
-        apply_codemod_to_file(event.src_path)
+        try:
+            apply_codemod_to_file(event.src_path)
+        except Exception as e:
+            print("Watchdog error!", e)
         
         queue.task_done()
 
@@ -105,8 +109,9 @@ class SQLTransformer(cst.CSTTransformer):
 
             # Not true, cst.Name is indication of processing having already occured. Well, this
             # was true when you coded this. I changed it because fuck it
-            # if not isinstance(first_arg, cst.SimpleString) or not isinstance(second_arg, cst.SimpleString):
-            #     raise ValueError("Both arguments to sql must be strings.")
+            if not isinstance(first_arg, cst.SimpleString) or not isinstance(second_arg, cst.SimpleString):
+                raise ValueError("Both arguments to sql must be strings.")
+                
             
 
             #print(f"First argument to sql: {first_arg.value}")
@@ -159,7 +164,7 @@ const {function_name} =sql`\n{sql_query}`;\n\n"""
             # Add my own custom function call, which will be used to ACTUALLY run the query.
             #print(f"Generated file:\n{generated_file}")
             function_call = f"""\nfrom apply_codemod import pydantic_insert, pydantic_select, pydantic_update
-def {function_name}(params: {function_name}Params) -> {function_name}Result:
+def {function_name}(params: {function_name}Params) -> Optional[List[{function_name}Result]]:
     return True # Will figure this out later\n\n
 """
             generated_file = generated_file +  function_call
@@ -383,6 +388,28 @@ def pydantic_update(table_name: str, nodes: List[Any], where_field: str, include
             # Execute the INSERT statement
             cursor.execute(query, tuple(node_dict.values()))
 
+
+
+T = TypeVar('T', bound=Callable[..., Any])
+def sql(query: str, func: T) -> T:
+    # Get the name of func and add "Result" to it to get the return_type
+    return_type_class_name = func.__name__ + "Result"
+    return_type_class = globals().get(return_type_class_name)
+
+    if return_type_class is None:
+        raise ValueError(f"Return type class {return_type_class_name} not found")
+    
+    conn = db_connect(row_factory=class_row(return_type_class))
+    with conn.cursor() as cursor:
+        cursor.execute(query)
+        # Try to fetch rows, for SELECT statements
+        try:
+            rows = cursor.fetchall()
+        # Insert, Update, Delete statements don't return rows
+        except:
+            rows = None
+    
+    return rows
 
 
 
