@@ -187,6 +187,10 @@ def {function_name}(params: {function_name}Params) -> Optional[List[{function_na
 
         return updated_node
 
+    # I am considering completely remove this. Return type can be fully inferenced from the function return type.
+    # By not hardcoding the return type, I can allow for more flexibility in the set of possibly returned types:
+    # ex: we dont know if the user is SELECTing 1 or many rows, List[Type] or Type
+    # ex2: Maybe it makes sense to make the return type Optional, if the user is doing an INSERT or UPDATE
     def leave_Assign(self, original_node: cst.Assign, updated_node: cst.Assign):
         # Check if the value being assigned is a call to `sql`
         if (
@@ -195,8 +199,11 @@ def {function_name}(params: {function_name}Params) -> Optional[List[{function_na
             and updated_node.value.func.value == "sql"
         ):
             second_arg = updated_node.value.args[1].value
-            horrific_construction = f"{second_arg.value}Result"
-            new_annotation = cst.Annotation(annotation=cst.Name(horrific_construction))
+            # {second_arg.value}
+            
+            constructed_annotation = f"Union[List[{second_arg.value}Result], None]"
+    
+            new_annotation = cst.Annotation(annotation=cst.Name(constructed_annotation))
            
             return cst.AnnAssign(
                 target=updated_node.targets[0].target,
@@ -211,11 +218,6 @@ def {function_name}(params: {function_name}Params) -> Optional[List[{function_na
         new_imports = []  # List to hold new import nodes
 
         # Check if the file has already been processed
-
-        
-        
-
-
         for i in range(len(self.extracted_sql_strings)):
             function_name = self.extracted_function_names[i]
             
@@ -270,6 +272,8 @@ def apply_codemod_to_file(filename: str):
 
 
 # My personal psycopg functions, which I want to use :)
+# For now I'm going to directly execute SQL satements using psycopg3. A more nuanced approach
+# May be needed later for advanced queries
 def db_connect(row_factory=None):
     """ Connect to the PostgreSQL database server """
     conn = None
