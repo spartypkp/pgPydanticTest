@@ -25,6 +25,20 @@ sys.path.append(parent)
 
 # ================================= WATCHDOG ========================================
 LOGGER = None
+
+
+def main():
+    global LOGGER
+    with open('config.json') as f:
+        config = json.load(f)
+    f.close()
+    srcDir = config['srcDir']
+    LOGGER = create_logger(verbose=True)
+    
+    LOGGER.info(f"Starting watchDawg program.")
+    LOGGER.debug(f"srcDir: {srcDir}")
+    start_watching(srcDir)
+
 class PyFileEventHandler(FileSystemEventHandler):
     def __init__(self, queue):
         self.queue = queue
@@ -45,6 +59,7 @@ def worker(queue):
         event = queue.get()
         if event is None:  # None is sent as a signal to stop the worker
             break
+        assert(LOGGER is not None)
         # Your callback function goes here
         print(f"Detected change in: {event.src_path}")
 
@@ -487,12 +502,4 @@ def create_logger(verbose=False):
 
 
 if __name__ == "__main__":
-    with open('config.json') as f:
-        config = json.load(f)
-    f.close()
-    srcDir = config['srcDir']
-    LOGGER = create_logger(verbose=True)
-    
-    # LOGGER.info(f"Starting watchDawg program.")
-    # LOGGER.debug(f"srcDir: {srcDir}")
-    start_watching(srcDir)
+    main()
