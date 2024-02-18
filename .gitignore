@@ -1,2 +1,6 @@
 /env
 /node_modules
+# Any folders called "logs"
+/logs
+# Any files called "log"
+/*.log

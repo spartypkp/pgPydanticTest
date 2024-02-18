@@ -53,6 +53,7 @@ def worker(queue):
             apply_codemod_to_file(event.src_path)
         except Exception as e:
             LOGGER.info(f"Error watching file: {event.src_path}. Error: {e}")
+            #print(f"Error watching file: {event.src_path}. Error: {e}")
         
         queue.task_done()
 
@@ -89,7 +90,7 @@ class SQLTransformer(cst.CSTTransformer):
         self.pydantic_models_to_write = []
         self.extracted_sql_strings = []
         self.extracted_function_names = []
-        LOGGER.info(f"Initializing SQLTransformer with filename: {filename}")
+        # LOGGER.info(f"Initializing SQLTransformer with filename: {filename}")
 
     def leave_Call(self, node: cst.Call, updated_node: cst.Call):
         if isinstance(node.func, cst.Name) and node.func.value == "sql":
@@ -112,7 +113,7 @@ class SQLTransformer(cst.CSTTransformer):
             
             first_arg = node.args[0].value
             second_arg = node.args[1].value
-            LOGGER.info(f"Found sql call:\n -{node.args[0].value}")
+            # LOGGER.info(f"Found sql call:\n -{node.args[0].value}")
 
             # Not true, cst.Name is indication of processing having already occured. Well, this
             # was true when you coded this. I changed it because fuck it
@@ -492,6 +493,6 @@ if __name__ == "__main__":
     srcDir = config['srcDir']
     LOGGER = create_logger(verbose=True)
     
-    LOGGER.info(f"Starting watchDawg program.")
-    LOGGER.debug(f"srcDir: {srcDir}")
+    # LOGGER.info(f"Starting watchDawg program.")
+    # LOGGER.debug(f"srcDir: {srcDir}")
     start_watching(srcDir)

@@ -4,11 +4,11 @@ from typing import Optional, List, Any, Dict
 
 from typing_extensions import NewType
 
-""" 'SelectRows' parameters type """
-SelectRowsParams = NewType('SelectRowsParams', None)
+""" 'SelectFederalRows' parameters type """
+SelectFederalRowsParams = NewType('SelectFederalRowsParams', None)
 
-""" 'SelectRows' return type """
-class SelectRowsResult (BaseModel):
+""" 'SelectFederalRows' return type """
+class SelectFederalRowsResult (BaseModel):
   addendum: Optional[List[str]]
   addendum_metadata: Optional[Dict[str, Any]]
   addendum_references: Optional[Dict[str, Any]]
@@ -48,16 +48,16 @@ class SelectRowsResult (BaseModel):
   topics: Optional[Dict[str, Any]]
 
 
-""" 'SelectRows' query type """
-class SelectRowsQuery (BaseModel):
-  params: SelectRowsParams
-  result: SelectRowsResult
+""" 'SelectFederalRows' query type """
+class SelectFederalRowsQuery (BaseModel):
+  params: SelectFederalRowsParams
+  result: SelectFederalRowsResult
 
 
 
 
 from apply_codemod import pydantic_insert, pydantic_select, pydantic_update
-def SelectRows(params: SelectRowsParams) -> Optional[List[SelectRowsResult]]:
+def SelectFederalRows(params: SelectFederalRowsParams) -> Union[List["selectFederalRows"Result], None]:
     return True # Will figure this out later
 
 
