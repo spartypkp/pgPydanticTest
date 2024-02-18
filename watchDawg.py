@@ -14,7 +14,7 @@ from libcst.metadata import ParentNodeProvider
 import psycopg
 from psycopg.types.json import Jsonb
 from psycopg.rows import class_row, dict_row
-from typing import List, Any, Optional, TypeVar, Callable, Union
+from typing import List, Any, Optional, TypeVar, Callable, Union, get_args, get_origin
 import pydantic
 import logging
 import os
@@ -180,27 +180,42 @@ const {function_name} =sql`\n{sql_query}`;\n\n"""
             self.extracted_function_names.append(function_name)
 
 
-            
-            
-            # Extract the result type from the second argument
-            result_type = second_arg.value.lstrip('"').rstrip('"') + "Result"
-            result_type = result_type[0].upper() + result_type[1:]
-
-            # Find the index of  result_type in the generated_file
-            params_type_index = generated_file.find(f"{function_name}Params")
-            LOGGER.debug(f"params_type_index: {params_type_index}")
             test_string = " = None"
+    
+            ## Parse the return type
+            result_type = f"{function_name}Result"
+            result_type_index = generated_file.find(result_type)
+            LOGGER.debug(f"result_type_index: {result_type_index}")
+
+            # If test_string occurs right after result_type_index. throw an error
+            result_string = f" -> List[{result_type}]"
+
+            
+            if generated_file[result_type_index + len(result_type):result_type_index + len(result_type) + len(test_string)] == test_string:
+                LOGGER.debug(f"Result type: {result_type} evaluates to None! ")
+                result_string = " -> None"
+
+
+            ## Parse the parameter type
+            # Find the index of params_type in the generated_file
+            params_type = f"{function_name}Params"
+            params_type_index = generated_file.find(params_type)
+            LOGGER.debug(f"params_type_index: {params_type_index}")
+            
             # If test_string occurs right after result_type_index. throw an error
             parameter_string = f"params: {function_name}Params"
 
-            LOGGER.debug(f"Text following index: {generated_file[params_type_index + len(result_type):params_type_index + len(result_type) + len(test_string)]}")
-            if generated_file[params_type_index + len(result_type):params_type_index + len(result_type) + len(test_string)] == test_string:
+            LOGGER.debug(f"Text following index: {generated_file[params_type_index + len(params_type):params_type_index + len(params_type) + len(test_string)]}")
+            if generated_file[params_type_index + len(params_type):params_type_index + len(params_type) + len(test_string)] == test_string:
                 LOGGER.debug(f"Parameter type: f{function_name}Params evaluates to None! ")
                 parameter_string = ""
 
-            LOGGER.debug(f"Adding function call: {function_name} with result type: {result_type}")
-            function_call = f"""\nfrom apply_codemod import pydantic_insert, pydantic_select, pydantic_update
-def {function_name}({parameter_string}) -> Union[List[{result_type}], None]:
+            LOGGER.debug(f"Adding function call: {function_name} with parameter type: {params_type}, result type: {result_type}")
+
+            ## Construct the function call
+            import_statment = ""
+            function_call = f"""\n{import_statment}
+def {function_name}({parameter_string}){result_string}:
     return True # Will figure this out later\n\n
 """
             generated_file = generated_file +  function_call
@@ -343,10 +358,10 @@ def db_connect(row_factory=None):
         with open('config.json') as f:
             db_params = json.load(f)
         f.close()
-        dbname = db_params['db'][dbname]
-        host = db_params['db'][host]
-        password = db_params['db'][password]
-        user = db_params['db'][user]
+        dbname = db_params['db']["dbName"]
+        host = db_params['db']["host"]
+        password = db_params['db']["password"]
+        user = db_params['db']["user"]
         conn = psycopg.connect(dbname=dbname,host=host,user=user,password=password,port="5432",client_encoding="utf8")
        
 		
@@ -456,14 +471,22 @@ def pydantic_update(table_name: str, nodes: List[Any], where_field: str, include
 
 T = TypeVar('T', bound=Callable[..., Any])
 def sql(query: str, func: T) -> T:
-    # Get the name of func and add "Result" to it to get the return_type
-    return_type_class_name = func.__name__ + "Result"
-    return_type_class = globals().get(return_type_class_name)
+    # Get the return type of func
+    return_type_class_name = func.__annotations__['return']
+    print(f"Return type class name: {return_type_class_name}")
+    origin = get_origin(return_type_class_name)
+    args = get_args(return_type_class_name)
 
-    if return_type_class is None:
+    # Check if the origin is typing.Optional
+    
+    arg = args[0]
+    pydantic_class = get_args(arg)[0]
+    print(f"Pydantic return model: {pydantic_class}")
+
+    if pydantic_class is None:
         raise ValueError(f"Return type class {return_type_class_name} not found")
     
-    conn = db_connect(row_factory=class_row(return_type_class))
+    conn = db_connect(row_factory=class_row(pydantic_class))
     with conn.cursor() as cursor:
         cursor.execute(query)
         # Try to fetch rows, for SELECT statements
