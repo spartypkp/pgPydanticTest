@@ -7,7 +7,7 @@ from typing_extensions import NewType
 from datetime import datetime
 
 """ 'SelectFederalRows' parameters type """
-SelectFederalRowsParams = NewType('SelectFederalRowsParams', None)
+SelectFederalRowsParams = None
 
 """ 'SelectFederalRows' return type """
 class SelectFederalRowsResult (BaseModel):
@@ -52,14 +52,13 @@ class SelectFederalRowsResult (BaseModel):
 
 """ 'SelectFederalRows' query type """
 class SelectFederalRowsQuery (BaseModel):
-  params: SelectFederalRowsParams
   result: SelectFederalRowsResult
 
 
 
 
 from apply_codemod import pydantic_insert, pydantic_select, pydantic_update
-def SelectFederalRows(params: SelectFederalRowsParams) -> Union[List["selectFederalRows"Result], None]:
+def SelectFederalRows(params: SelectFederalRowsParams) -> Union[List[SelectFederalRowsResult], None]:
     return True # Will figure this out later
 
 

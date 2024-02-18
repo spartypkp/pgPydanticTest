@@ -178,12 +178,29 @@ const {function_name} =sql`\n{sql_query}`;\n\n"""
 
             function_name = function_name[0].upper() + function_name[1:]
             self.extracted_function_names.append(function_name)
+
+
             
-            # Add my own custom function call, which will be used to ACTUALLY run the query.
-            result_type = f"Union[List[{second_arg.value.lstrip('"').rstrip('"')}Result], None]"
+            
+            # Extract the result type from the second argument
+            result_type = second_arg.value.lstrip('"').rstrip('"') + "Result"
+            result_type = result_type[0].upper() + result_type[1:]
+
+            # Find the index of  result_type in the generated_file
+            params_type_index = generated_file.find(f"{function_name}Params")
+            LOGGER.debug(f"params_type_index: {params_type_index}")
+            test_string = " = None"
+            # If test_string occurs right after result_type_index. throw an error
+            parameter_string = f"params: {function_name}Params"
+
+            LOGGER.debug(f"Text following index: {generated_file[params_type_index + len(result_type):params_type_index + len(result_type) + len(test_string)]}")
+            if generated_file[params_type_index + len(result_type):params_type_index + len(result_type) + len(test_string)] == test_string:
+                LOGGER.debug(f"Parameter type: f{function_name}Params evaluates to None! ")
+                parameter_string = ""
+
             LOGGER.debug(f"Adding function call: {function_name} with result type: {result_type}")
             function_call = f"""\nfrom apply_codemod import pydantic_insert, pydantic_select, pydantic_update
-def {function_name}(params: {function_name}Params) -> {result_type}:
+def {function_name}({parameter_string}) -> Union[List[{result_type}], None]:
     return True # Will figure this out later\n\n
 """
             generated_file = generated_file +  function_call
