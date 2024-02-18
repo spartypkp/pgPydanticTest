@@ -1,4 +1,3 @@
-from test_models import SelectFederalRowsParams, SelectFederalRowsResult, SelectFederalRows
 from watchDawg import sql
 from typing import List, Optional, Union
 
@@ -6,10 +5,10 @@ from typing import List, Optional, Union
 def main():
     print("File for testing pgtyped-pydantic")
 
-    # Test SQL SELECT
-    # result = sql("SELECT * FROM us_federal_ecfr LIMIT 10;", "SelectFederalRows")
-    result: Union[List[SelectFederalRowsResult], None] = sql("SELECT * FROM us_federal_ecfr LIMIT 10;", SelectFederalRows)    
+    # Test SQL SELECT,   cmon  plzzzz
+    result = sql("SELECT * FROM us_federal_ecfr LIMIT 10;", "SelectFederalRows")
     
+
     # Test SQL INSERT - single row
 
 

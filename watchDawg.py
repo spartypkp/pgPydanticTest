@@ -67,8 +67,12 @@ def worker(queue):
         try:
             apply_codemod_to_file(event.src_path)
         except Exception as e:
-            LOGGER.info(f"Error watching file: {event.src_path}. Error: {e}")
-            #print(f"Error watching file: {event.src_path}. Error: {e}")
+            # If the type of the Exception is SyntaxError, then the file is already processed. This should be ignored
+            if type(e) == SyntaxError:
+                LOGGER.info(f"File already processed: {event.src_path}. Skipping.")
+            else:
+                LOGGER.exception(f"Error applying codemod to file: {event.src_path}. Error: {e}")
+            
         
         queue.task_done()
 
@@ -103,8 +107,7 @@ class SQLTransformer(cst.CSTTransformer):
         self.filename = filename
         self.filename_without_extension = filename.rsplit(".", 1)[0] if "." in filename else filename
         self.pydantic_models_to_write = []
-        self.extracted_sql_strings = []
-        self.extracted_function_names = []
+        self.extracted_sql_queries = {}
         # LOGGER.info(f"Initializing SQLTransformer with filename: {filename}")
 
     def leave_Call(self, node: cst.Call, updated_node: cst.Call):
@@ -140,7 +143,7 @@ class SQLTransformer(cst.CSTTransformer):
             function_name = second_arg.value.lstrip('"').rstrip('"')  # Remove the double quotes
             sql_query = first_arg.value.lstrip('"').rstrip('"')  # Remove the double quotes
 
-            self.extracted_sql_strings.append(sql_query)
+            
             
 
             # Don't look at this
@@ -177,7 +180,7 @@ const {function_name} =sql`\n{sql_query}`;\n\n"""
             subprocess.run(['rm', ts_filename])
 
             function_name = function_name[0].upper() + function_name[1:]
-            self.extracted_function_names.append(function_name)
+            
 
 
             test_string = " = None"
@@ -188,12 +191,15 @@ const {function_name} =sql`\n{sql_query}`;\n\n"""
             LOGGER.debug(f"result_type_index: {result_type_index}")
 
             # If test_string occurs right after result_type_index. throw an error
+            
             result_string = f" -> List[{result_type}]"
 
             
             if generated_file[result_type_index + len(result_type):result_type_index + len(result_type) + len(test_string)] == test_string:
                 LOGGER.debug(f"Result type: {result_type} evaluates to None! ")
                 result_string = " -> None"
+            
+            result_type = result_string.split(" -> ")[1].strip()
 
 
             ## Parse the parameter type
@@ -203,19 +209,31 @@ const {function_name} =sql`\n{sql_query}`;\n\n"""
             LOGGER.debug(f"params_type_index: {params_type_index}")
             
             # If test_string occurs right after result_type_index. throw an error
-            parameter_string = f"params: {function_name}Params"
+            params_string = f"params: {function_name}Params"
+            
 
             LOGGER.debug(f"Text following index: {generated_file[params_type_index + len(params_type):params_type_index + len(params_type) + len(test_string)]}")
             if generated_file[params_type_index + len(params_type):params_type_index + len(params_type) + len(test_string)] == test_string:
                 LOGGER.debug(f"Parameter type: f{function_name}Params evaluates to None! ")
-                parameter_string = ""
+                params_string = ""
+
+            if len(params_string) > 0:
+                params_type = params_string.split(":")[1].strip()
 
             LOGGER.debug(f"Adding function call: {function_name} with parameter type: {params_type}, result type: {result_type}")
+
+            ## Add the function name, params type, and result types to the dictionary, SQL string is key
+            self.extracted_sql_queries[sql_query] = {
+                "function_name": function_name,
+                "params_type": params_type,
+                "result_type": result_type,
+                "sql_query": sql_query
+            }
 
             ## Construct the function call
             import_statment = ""
             function_call = f"""\n{import_statment}
-def {function_name}({parameter_string}){result_string}:
+def {function_name}({params_string}){result_string}:
     return True # Will figure this out later\n\n
 """
             generated_file = generated_file +  function_call
@@ -249,33 +267,28 @@ def {function_name}({parameter_string}){result_string}:
             and isinstance(updated_node.value.func, cst.Name)
             and updated_node.value.func.value == "sql"
         ):
-            second_arg = updated_node.value.args[1].value
+            original_sql = updated_node.value.args[0].value.value.lstrip('"').rstrip('"')
+            second_arg = updated_node.value.args[1].value.value
             
-            # Doesn't work. Used to work when only a Pydantic Type
-            #constructed_annotation = f"Union[List[{second_arg.value}Result], None]"
-
-            # Maybe I was too hasty when I removed Sean's old code here
-            
-            constructed_annotation = cst.Annotation(
-                annotation=cst.Subscript(
-                    value=cst.Name(value="Union"),
-                    slice=[
-                        cst.SubscriptElement(
-                            slice=cst.Index(
-                                value=cst.Subscript(
-                                    value=cst.Name(value="List"),
-                                    slice=[
-                                        cst.SubscriptElement(
-                                            slice=cst.Index(value=cst.Name(value=f"{second_arg.value}Result"))
-                                        )
-                                    ],
-                                )
-                            )
-                        ),
-                        cst.SubscriptElement(slice=cst.Index(value=cst.Name(value="None"))),
-                    ],
+            construction_data = self.extracted_sql_queries[original_sql]
+            if construction_data["result_type"] == "None":
+                constructed_annotation = cst.Annotation(
+                    annotation=cst.Subscript(
+                        value=cst.Name(value="None"),
+                    )
                 )
-            )
+            else:
+            
+                constructed_annotation = cst.Annotation(
+                    annotation=cst.Subscript(
+                        value=cst.Name(value="List"),
+                        slice=[
+                            cst.SubscriptElement(
+                                slice=cst.Index(value=cst.Name(value=f"{second_arg}Result"))
+                            )
+                        ],
+                    )
+                )
     
             
            
@@ -292,16 +305,22 @@ def {function_name}({parameter_string}){result_string}:
         new_imports = []  # List to hold new import nodes
 
         # Check if the file has already been processed
-        for i in range(len(self.extracted_sql_strings)):
-            function_name = self.extracted_function_names[i]
+        for k,v in self.extracted_sql_queries.items():
+            function_name = v["function_name"]
+            import_from_name = f"{self.filename_without_extension.split('/')[-1]}_models"
+            LOGGER.debug(f"Adding import for function: {function_name} from {import_from_name}")
+
+            # Always add the function to the import
+            names = [cst.ImportAlias(name=cst.Name(f"{function_name}"))]
+            # Check if the Params and Result types are actually needed
+            if v["params_type"] != "":
+                names.append(cst.ImportAlias(name=cst.Name(f"{function_name}Params")))
+            if v["result_type"] != "None":
+                names.append(cst.ImportAlias(name=cst.Name(f"{function_name}Result")))
             
             new_import = cst.ImportFrom(
-                module=cst.Name("test_models"),
-                names=[
-                    cst.ImportAlias(name=cst.Name(f"{function_name}Params")),
-                    cst.ImportAlias(name=cst.Name(f"{function_name}Result")),
-                    cst.ImportAlias(name=cst.Name(f"{function_name}")),
-                ],
+                module=cst.Name(import_from_name),
+                names=names,
             )
             
             new_imports.append(new_import)  # Add new import node to the list
