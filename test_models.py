@@ -1,8 +1,10 @@
 # Pydantic models generated for queries found in /Users/s/VSCodeProjects/pgPydanticTest/test.py
 from pydantic import BaseModel, Field
-from typing import Optional, List, Any, Dict
+from typing import Optional, List, Any, Dict, Union 
 
 from typing_extensions import NewType
+
+from datetime import datetime
 
 """ 'SelectFederalRows' parameters type """
 SelectFederalRowsParams = NewType('SelectFederalRowsParams', None)

@@ -28,12 +28,12 @@ LOGGER = None
 
 
 def main():
-    global LOGGER
+    
     with open('config.json') as f:
         config = json.load(f)
     f.close()
     srcDir = config['srcDir']
-    LOGGER = create_logger(verbose=True)
+    create_logger(verbose=True)
     
     LOGGER.info(f"Starting watchDawg program.")
     LOGGER.debug(f"srcDir: {srcDir}")
@@ -111,27 +111,22 @@ class SQLTransformer(cst.CSTTransformer):
         if isinstance(node.func, cst.Name) and node.func.value == "sql":
             
             
-            #print(len(node.args))
-            #print(node.args[0])
-            #print(node.args[1])
-            #print(type(node.args[1]))
-
-            # Check if the second argument type is already cst.Name, if so, return
-            if isinstance(node.args[1], cst.Name):
-                return updated_node
-
-
-            #print("Found sql call")
             if len(node.args) < 2:
-                raise ValueError("The sql function must have two string arguments.")
-            
+                raise ValueError("The sql function must have two arguments.")
             
             first_arg = node.args[0].value
             second_arg = node.args[1].value
-            # LOGGER.info(f"Found sql call:\n -{node.args[0].value}")
+
+            # Check if the second argument type is already cst.Name, if so, return
+            # Denotes this sql tag has already been processed
+            if isinstance(first_arg, cst.SimpleString) and isinstance(second_arg, cst.Name):
+                raise SyntaxError("This sql tag has already been processed. Skipping.")
+
 
             # Not true, cst.Name is indication of processing having already occured. Well, this
             # was true when you coded this. I changed it because fuck it
+            LOGGER.debug(f"Type of first_arg: {type(first_arg)}")
+            LOGGER.debug(f"Type of second_arg: {type(second_arg)}")
             if not isinstance(first_arg, cst.SimpleString) or not isinstance(second_arg, cst.SimpleString):
                 raise ValueError("Both arguments to sql must be strings.")
                 
@@ -185,9 +180,10 @@ const {function_name} =sql`\n{sql_query}`;\n\n"""
             self.extracted_function_names.append(function_name)
             
             # Add my own custom function call, which will be used to ACTUALLY run the query.
-            #print(f"Generated file:\n{generated_file}")
+            result_type = f"Union[List[{second_arg.value.lstrip('"').rstrip('"')}Result], None]"
+            LOGGER.debug(f"Adding function call: {function_name} with result type: {result_type}")
             function_call = f"""\nfrom apply_codemod import pydantic_insert, pydantic_select, pydantic_update
-def {function_name}(params: {function_name}Params) -> Union[List[{second_arg.value}Result], None]:
+def {function_name}(params: {function_name}Params) -> {result_type}:
     return True # Will figure this out later\n\n
 """
             generated_file = generated_file +  function_call

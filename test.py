@@ -6,8 +6,8 @@ from typing import List, Optional, Union
 def main():
     print("File for testing pgtyped-pydantic")
 
-    result: Union[List[SelectFederalRowsResult], None] = sql("SELECT * FROM us_federal_ecfr LIMIT 10;", SelectFederalRows)   
-    
+    result: Union[List[SelectFederalRowsResult], None] = sql("SELECT * FROM us_federal_ecfr LIMIT 10;", SelectFederalRows)    
+    # Logger debug success. Try againnn
     print(result)
 
 
