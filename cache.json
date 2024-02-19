@@ -1,0 +1,24 @@
+{
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "type": "object",
+    "patternProperties": {
+        "^[a-f0-9]{32}$": {
+            "type": "object",
+            "properties": {
+                "sql_string": {
+                    "type": "string"
+                },
+                "filename": {
+                    "type": "string"
+                },
+                "mode_of_invocation": {
+                    "type": "string",
+                    "enum": ["sql", "python"]
+                }
+
+            },
+            "required": ["sql_string", "filename", "mode_of_invocation", "return_type", "parameter_type"]
+        }
+    },
+    "additionalProperties": false
+}

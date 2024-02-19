@@ -23,9 +23,18 @@ parent = os.path.dirname(DIR)
 sys.path.append(parent)
 
 
+# Watch for changes in all .py file, until a file that matches the pattern changes
+# Regenerate all models using pgtyped-pydantic
+    # - This is in leave_call
+# For all invocations, change the annotations of the return
+    # - This is in leave_assign
+# Check the difference between the old model file and new model file
+    # - This should be done in leave_module
+    # - If there is a difference, then update the _models file, replace the cache,json file key/values for all objects with same file value
+
+
 # ================================= WATCHDOG ========================================
 LOGGER = None
-
 
 def main():
     
@@ -106,160 +115,40 @@ class SQLTransformer(cst.CSTTransformer):
     def __init__(self, filename:str):
         self.filename = filename
         self.filename_without_extension = filename.rsplit(".", 1)[0] if "." in filename else filename
-        self.pydantic_models_to_write = []
+        self.sql_filename = ""
         self.extracted_sql_queries = {}
         # LOGGER.info(f"Initializing SQLTransformer with filename: {filename}")
 
     def leave_Call(self, node: cst.Call, updated_node: cst.Call):
         if isinstance(node.func, cst.Name) and node.func.value == "sql":
-            
-            
             if len(node.args) < 2:
                 raise ValueError("The sql function must have two arguments.")
             
-            first_arg = node.args[0].value
-            second_arg = node.args[1].value
-
-            # Check if the second argument type is already cst.Name, if so, return
-            # Denotes this sql tag has already been processed
-            if isinstance(first_arg, cst.SimpleString) and isinstance(second_arg, cst.Name):
-                raise SyntaxError("This sql tag has already been processed. Skipping.")
-
-
-            # Not true, cst.Name is indication of processing having already occured. Well, this
-            # was true when you coded this. I changed it because fuck it
-            LOGGER.debug(f"Type of first_arg: {type(first_arg)}")
-            LOGGER.debug(f"Type of second_arg: {type(second_arg)}")
-            if not isinstance(first_arg, cst.SimpleString) or not isinstance(second_arg, cst.SimpleString):
-                raise ValueError("Both arguments to sql must be strings.")
-                
-            
-
-            #print(f"First argument to sql: {first_arg.value}")
-            #print(f"Second argument to sql: {second_arg.value}")
+            sql_string = node.args[0].value
+            function_name = node.args[1].value.value.lstrip('"').rstrip('"')
 
             
+            LOGGER.debug(f"Type of first_arg: {type(sql_string)}")
+            LOGGER.debug(f"Type of second_arg: {type(function_name)}")
             
-            function_name = second_arg.value.lstrip('"').rstrip('"')  # Remove the double quotes
-            sql_query = first_arg.value.lstrip('"').rstrip('"')  # Remove the double quotes
+            if not isinstance(sql_string, cst.SimpleString):
+                raise ValueError("Argument to sql must be of type String")
+            sql_query = sql_string.value.lstrip('"').rstrip('"')
 
-            
-            
+            hash_id = construct_id(self.filename, sql_query)
+            # sql_string_in_ts = f"const {function_name} =sql`\n{sql_query}`;\n\n"
+            sql_filename = f"{self.filename_without_extension}_queries.sql"
+            self.sql_filename = sql_filename
 
-            # Don't look at this
-            ts_filename = f"DISGUSTING_test_HACK.ts"
-            # Combine the function name comment and the SQL query
-            sql_named_query = f"""import {{ sql }} from '@pgtyped-pydantic/runtime';
-
-// Welcome to the worst hack of all time
-
-const {function_name} =sql`\n{sql_query}`;\n\n"""
-
-            # Don't look at this hack either
-            with open(ts_filename, "w") as f:
-                f.write(sql_named_query)
-            #print(f"Writing SQL to {ts_filename}")
-            f.close()
-
-            # Define cli args
-            cfg = 'config.json'
-            file_override = ts_filename
-            
-            # Running repository as python subprocess
-            command = ['npx', 'pgtyped-pydantic', '-c', cfg, '-f', file_override]
-            process = subprocess.run(command, capture_output=True)
-            
-            # Print out the stdout and stderr
-            #print(f"stdout: {process.stdout.decode('utf-8')}")
-            #print(f"stderr: {process.stderr.decode('utf-8')}")
-            # result.stderr contains the stderr output
-            generated_file = process.stdout.decode('utf-8').replace("\"DISGUSTING_test_HACK.ts\"", self.filename)
-            
-            # Nuke the temporary test.ts file hack out of existence (Cover my tracks).
-            # This could be dangerous if someone is retarded enough to have another file named DISGUSTING_test_HACK.ts
-            subprocess.run(['rm', ts_filename])
-
-            function_name = function_name[0].upper() + function_name[1:]
-            
-
-
-            test_string = " = None"
-    
-            ## Parse the return type
-            result_type = f"{function_name}Result"
-            result_type_index = generated_file.find(result_type)
-            LOGGER.debug(f"result_type_index: {result_type_index}")
-
-            # If test_string occurs right after result_type_index. throw an error
-            
-            result_string = f" -> List[{result_type}]"
-
-            
-            if generated_file[result_type_index + len(result_type):result_type_index + len(result_type) + len(test_string)] == test_string:
-                LOGGER.debug(f"Result type: {result_type} evaluates to None! ")
-                result_string = " -> None"
-            
-            result_type = result_string.split(" -> ")[1].strip()
-
-
-            ## Parse the parameter type
-            # Find the index of params_type in the generated_file
-            params_type = f"{function_name}Params"
-            params_type_index = generated_file.find(params_type)
-            LOGGER.debug(f"params_type_index: {params_type_index}")
-            
-            # If test_string occurs right after result_type_index. throw an error
-            params_string = f"params: {function_name}Params"
-            
-
-            LOGGER.debug(f"Text following index: {generated_file[params_type_index + len(params_type):params_type_index + len(params_type) + len(test_string)]}")
-            if generated_file[params_type_index + len(params_type):params_type_index + len(params_type) + len(test_string)] == test_string:
-                LOGGER.debug(f"Parameter type: f{function_name}Params evaluates to None! ")
-                params_string = ""
-
-            if len(params_string) > 0:
-                params_type = params_string.split(":")[1].strip()
-
-            LOGGER.debug(f"Adding function call: {function_name} with parameter type: {params_type}, result type: {result_type}")
-
-            ## Add the function name, params type, and result types to the dictionary, SQL string is key
-            self.extracted_sql_queries[sql_query] = {
+            sql_string_in_sql = f"/* @name {hash_id} */\n{sql_query}\n\n"
+            self.extracted_sql_queries[hash_id] = {
+                "sql_string": sql_query,
+                "sql_string_in_sql": sql_string_in_sql,
                 "function_name": function_name,
-                "params_type": params_type,
-                "result_type": result_type,
-                "sql_query": sql_query
             }
-
-            ## Construct the function call
-            import_statment = ""
-            function_call = f"""\n{import_statment}
-def {function_name}({params_string}){result_string}:
-    return True # Will figure this out later\n\n
-"""
-            generated_file = generated_file +  function_call
-            # Track this bad boy for later
-            self.pydantic_models_to_write.append(generated_file)
-        
-            new_args = list(node.args)
-
-            # I'm not going to add this processed tag, since the type of the second argument is already cst.Name
-            # new_args[0] = cst.Arg(value=cst.SimpleString(f'"processed!"'))
-
-            if len(node.args) >= 2:
-                print("Replacing second argument")
-                new_args[1] = cst.Arg(value=cst.Name(function_name))
-                return node.with_changes(args=tuple(new_args))
-            else:
-                print("Adding second argument")
-                new_args.append(cst.Arg(value=cst.Name(function_name)))
-                return node.with_changes(args=tuple(new_args))
 
         return updated_node
 
-    # I am considering completely remove this. Return type can be fully inferenced from the function return type.
-    # By not hardcoding the return type, I can allow for more flexibility in the set of possibly returned types:
-    # ex: we dont know if the user is SELECTing 1 or many rows, List[Type] or Type
-    # ex2: Maybe it makes sense to make the return type Optional, if the user is doing an INSERT or UPDATE
     def leave_Assign(self, original_node: cst.Assign, updated_node: cst.Assign):
         # Check if the value being assigned is a call to `sql`
         if (
@@ -268,28 +157,46 @@ def {function_name}({params_string}){result_string}:
             and updated_node.value.func.value == "sql"
         ):
             original_sql = updated_node.value.args[0].value.value.lstrip('"').rstrip('"')
-            second_arg = updated_node.value.args[1].value.value
+            hash_id = construct_id(self.filename, original_sql)
+            function_name = self.extracted_sql_queries[hash_id]["function_name"]
             
             construction_data = self.extracted_sql_queries[original_sql]
-            if construction_data["result_type"] == "None":
-                constructed_annotation = cst.Annotation(
-                    annotation=cst.Subscript(
-                        value=cst.Name(value="None"),
-                    )
-                )
-            else:
-            
-                constructed_annotation = cst.Annotation(
-                    annotation=cst.Subscript(
-                        value=cst.Name(value="List"),
-                        slice=[
-                            cst.SubscriptElement(
-                                slice=cst.Index(value=cst.Name(value=f"{second_arg}Result"))
+            return_annotation = cst.SubscriptElement(
+                            slice=cst.Index(
+                                value=cst.Subscript(
+                                    value=cst.Name(value="List"),
+                                    slice=[
+                                        cst.SubscriptElement(
+                                            slice=cst.Index(value=cst.Name(value=f"{function_name}Result"))
+                                        )
+                                    ],
+                                )
                             )
-                        ],
-                    )
+                        ),
+            if construction_data["params_type"] == "":
+                # Set the return Annnotation as None
+                return_annotation = cst.Annotation(cst.Name("None"))
+                
+            
+            
+            constructed_annotation = cst.Annotation(
+                annotation=cst.Subscript(
+                    value=cst.Name(value="Callable"),
+                    slice=[
+                        cst.SubscriptElement(
+                            slice=cst.Index(
+                                value=cst.Tuple(
+                                    elements=[
+                                        cst.Element(cst.Annotation(cst.Name("Any"))),
+                                    ]
+                                )
+                            )
+                        ),
+                        return_annotation
+                    ],
                 )
-    
+            )
+                
             
            
             return cst.AnnAssign(
@@ -302,6 +209,20 @@ def {function_name}({params_string}){result_string}:
         return updated_node
 
     def leave_Module(self, original_node: cst.Module, updated_node: cst.Module) -> cst.Module:
+
+        # Define cli args
+        cfg = 'config.json'
+        file_override = self.sql_filename
+        
+        # Running repository as python subprocess
+        command = ['npx', 'pgtyped-pydantic', '-c', cfg, '-f', file_override]
+        process = subprocess.run(command, capture_output=True)
+                
+        # Nuke the temporary test.ts file hack out of existence (Cover my tracks).
+        # This could be dangerous if someone is retarded enough to have another file named DISGUSTING_test_HACK.ts
+        
+
+
         new_imports = []  # List to hold new import nodes
 
         # Check if the file has already been processed
@@ -328,10 +249,6 @@ def {function_name}({params_string}){result_string}:
         # If nothing was added, return the original node
         if len(new_imports) == 0:
             return original_node
-        
-
-        with open(f'{self.filename_without_extension}_models.py', 'w') as f:
-            f.write("\n".join(self.pydantic_models_to_write))
 
 
         # Add a newline after the imports
@@ -391,115 +308,37 @@ def db_connect(row_factory=None):
         print(error)
         raise error
 
-def pydantic_insert(table_name: str, nodes: List[Any], include = None, user: Optional[str] = None):
-    # Get the psycopg3 connection object
-    conn = db_connect(user)
-
-    with conn.cursor() as cursor:
-        for node in nodes:
-            # Convert the NodeModel to a dictionary and exclude default values
-            if include:
-                node_dict = node.model_dump(mode="json",exclude_defaults=True, include=include)
-            else:
-                node_dict = node.model_dump(mode="json",exclude_defaults=True)
-
-            for key, value in node_dict.items():
-                if type(value) == dict:
-                    node_dict[key] = Jsonb(node_dict[key])
-            
-
-            # Prepare the column names and placeholders
-            columns = ', '.join(node_dict.keys())
-            placeholders = ', '.join(['%s'] * len(node_dict))
-
-            # Create the INSERT statement using psycopg.sql to safely handle identifiers
-            query = psycopg.sql.SQL("INSERT INTO {} ({}) VALUES ({})").format(
-                psycopg.sql.Identifier(table_name),
-                psycopg.sql.SQL(columns),
-                psycopg.sql.SQL(placeholders)
-            )
-
-            # Execute the INSERT statement
-            cursor.execute(query, tuple(node_dict.values()))
-
-    # Commit the changes
-    conn.commit()
-    conn.close()
-
-
-def pydantic_select(sql_select: str, classType: Optional[Any], user: Optional[str] = None ) -> List[Any]:
-    # If they provide a pydantic model, use it for the row factory
-    if classType:
-        conn = db_connect(user, row_factory=class_row(classType))
-    # Otherwise, return the dictionary row factory
-    else:
-        conn = db_connect(user, row_factory=dict_row)
-
-    cur = conn.cursor()
-
-    # Execute the SELECT statement
-    cur.execute(sql_select)
-
-    # Fetch all rows
-    rows = cur.fetchall()
-    
-
-    # Close the cursor and the connection
-    cur.close()
-    conn.close()
-
-    return rows
-
-
-def pydantic_update(table_name: str, nodes: List[Any], where_field: str, include = None, user: Optional[str] = None):
-    conn = db_connect(user)
-    
-    with conn.cursor() as cursor:
-        for node in nodes:
-            # Convert the NodeModel to a dictionary and exclude where field, include values to update only
-            
-            if include:
-                node_dict = node.model_dump(mode="json",exclude_defaults=True, exclude=[where_field], include=include)
-            else:
-                node_dict = node.model_dump(mode="json",exclude_defaults=True, exclude=[where_field])
-
-            
-
-            for key, value in node_dict.items():
-                if type(value) == dict:
-                    node_dict[key] = Jsonb(node_dict[key])
-            
-
-            # Prepare the column names and placeholders
-            columns = ', '.join(node_dict.keys())
-            placeholders = ', '.join(['%s'] * len(node_dict))
-            where_value = node_dict[where_field]
-
-            query = psycopg.sql.SQL("UPDATE {} SET ({}) = ({}) WHERE {} = {}").format(
-                psycopg.sql.Identifier(table_name),
-                psycopg.sql.SQL(columns),
-                psycopg.sql.SQL(placeholders),
-                psycopg.sql.Identifier(where_field),
-                where_value
-            )
-
-            # Execute the INSERT statement
-            cursor.execute(query, tuple(node_dict.values()))
-
 
 
 T = TypeVar('T', bound=Callable[..., Any])
 def sql(query: str, func: T) -> T:
+    # Get the filename of the file that called this function
+    filename = sys._getframe(1).f_globals['__file__']
+    print(f"Filename: {filename}")
+    # Hash the query
+    query_hash = hash(query)
+    # Get the name
+    
+    # Check if the function is in cache
+    # If it is, return it
+    # If it isn't, create it and add it to the cache
+
+    return Callable[..., T]
+
+
+def sql_executor(query: str, func: T) -> T:
     # Get the return type of func
     return_type_class_name = func.__annotations__['return']
     print(f"Return type class name: {return_type_class_name}")
+    print(type(return_type_class_name))
     origin = get_origin(return_type_class_name)
     args = get_args(return_type_class_name)
 
     # Check if the origin is typing.Optional
     
     arg = args[0]
-    pydantic_class = get_args(arg)[0]
+    print(f"Agrs: {args}")
+    pydantic_class = arg
     print(f"Pydantic return model: {pydantic_class}")
 
     if pydantic_class is None:
@@ -555,6 +394,9 @@ def create_logger(verbose=False):
     LOGGER.info("Logger Created")
 
 
+
+def construct_id(filename, sql_hash):
+    return f"{filename}/*/{sql_hash}"
 
 if __name__ == "__main__":
     main()
