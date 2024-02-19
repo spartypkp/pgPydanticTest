@@ -147,7 +147,7 @@ def {function_name}(params: {function_name}Params) -> {function_name}Result:
             # )
 
             return cst.AnnAssign(
-                target=updated_node.targets[0].target,
+                target=updated_node.targets[0].tartget,
                 annotation=new_annotation,
                 value=updated_node.value,
                 equal=cst.AssignEqual(),
