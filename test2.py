@@ -16,11 +16,11 @@ from typing import List
 
 
 def main():
-    print("File for testing pgtyped-pydantic")
+    print("File 2 for testing pgtyped-pydantic")
 
     # Test SQL SELECT, modify below comment for quick testing.  
     # select_result = sql("SELECT * FROM us_federal_ecfr WHERE node_type = 'content' AND status is NULL LIMIT 5;", "SelectFederalRows") try againnnnnnnn
-    select_result = sql("SELECT * FROM us_federal_ecfr WHERE node_type = 'content_type' AND status is NULL LIMIT 5;", "SelectFederalRows")
+    select_result_more = sql("SELECT * FROM us_federal_ecfr WHERE node_type = 'content_type' AND status is NULL LIMIT 10;")
 
     
     print(f"\n\n======== Test SQL Select ========")

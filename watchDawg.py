@@ -160,7 +160,7 @@ class SQLTransformer(cst.CSTTransformer):
             hash_id = construct_id(self.filename, original_sql)
             function_name = self.extracted_sql_queries[hash_id]["function_name"]
             
-            construction_data = self.extracted_sql_queries[original_sql]
+            construction_data = self.extracted_sql_queries[hash_id]
             return_annotation = cst.SubscriptElement(
                             slice=cst.Index(
                                 value=cst.Subscript(
@@ -173,10 +173,6 @@ class SQLTransformer(cst.CSTTransformer):
                                 )
                             )
                         ),
-            if construction_data["params_type"] == "":
-                # Set the return Annnotation as None
-                return_annotation = cst.Annotation(cst.Name("None"))
-                
             
             
             constructed_annotation = cst.Annotation(
@@ -226,7 +222,7 @@ class SQLTransformer(cst.CSTTransformer):
         new_imports = []  # List to hold new import nodes
 
         # Check if the file has already been processed
-        for k,v in self.extracted_sql_queries.items():
+        for k, v in self.extracted_sql_queries.items():
             function_name = v["function_name"]
             import_from_name = f"{self.filename_without_extension.split('/')[-1]}_models"
             LOGGER.debug(f"Adding import for function: {function_name} from {import_from_name}")
@@ -234,10 +230,9 @@ class SQLTransformer(cst.CSTTransformer):
             # Always add the function to the import
             names = [cst.ImportAlias(name=cst.Name(f"{function_name}"))]
             # Check if the Params and Result types are actually needed
-            if v["params_type"] != "":
-                names.append(cst.ImportAlias(name=cst.Name(f"{function_name}Params")))
-            if v["result_type"] != "None":
-                names.append(cst.ImportAlias(name=cst.Name(f"{function_name}Result")))
+            
+            names.append(cst.ImportAlias(name=cst.Name(f"{function_name}Params")))  
+            names.append(cst.ImportAlias(name=cst.Name(f"{function_name}Result")))
             
             new_import = cst.ImportFrom(
                 module=cst.Name(import_from_name),
@@ -266,19 +261,20 @@ def apply_codemod_to_file(filename: str):
     # Parse the source code into a CST
     tree = cst.parse_module(source_code)
 
+    print(f"\n\nTree:\n\n{tree}")
+    print(type(tree))
+
+    exit(1)
+
     # Apply the codemod
     transformer = SQLTransformer(filename)
     modified_tree = tree.visit(transformer)
 
-
-    #print(f"\n\n\n\nModified code:\n{modified_tree.code}")
-
-
-    # Replace the original file with the modified code
-    with open(filename, "w") as f:
-        f.write(modified_tree.code)
-
-
+    LOGGER.info(f"\n\n\n{modified_tree.code}")
+    # Remove .py extension and add _processed.py to the filename
+    new_filename = filename.rsplit(".", 1)[0] + "_processed.py"
+    with open(new_filename, "w") as f2:
+        f2.write(modified_tree.code)
 
 # ================================= UTILITY FUNCTIONS ========================================
 
@@ -395,8 +391,8 @@ def create_logger(verbose=False):
 
 
 
-def construct_id(filename, sql_hash):
-    return f"{filename}/*/{sql_hash}"
+def construct_id(filename, sql):
+    return f"{filename}/*/{hash(sql)}"
 
 if __name__ == "__main__":
     main()
