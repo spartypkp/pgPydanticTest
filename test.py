@@ -1,4 +1,3 @@
-from test_models import SelectFederalRows, SelectFederalRowsParams, SelectFederalRowsResult
 from watchDawg import sql
 from typing import List
 
@@ -19,15 +18,15 @@ def main():
     print("File for testing pgtyped-pydantic")
 
     # Test SQL SELECT, modify below comment for quick testing.  
-    # select_result = sql("SELECT * FROM us_federal_ecfr WHERE node_type = 'content' AND status is NULL LIMIT 5;", "SelectFederalRows") try againnnnnnnn
-    select_result = sql("SELECT * FROM us_federal_ecfr WHERE node_type = 'content_type' AND status is NULL LIMIT 5;", "SelectFederalRows")
+    # select_result = sql("SELECT * FROM us_federal_ecfr WHERE node_type = 'content' AND status is NULL LIMIT 5;", "SelectFederalRows") try againnnnnnnnnnnnnnnnnnnnnnnnnnnnnnn
+    select_federal_rows = sql("SELECT * FROM us_federal_ecfr WHERE node_type = 'content_type' AND status is NULL LIMIT 5;")
 
     
-    print(f"\n\n======== Test SQL Select ========")
-    print(f"Type of result: {type(select_result)}")
-    print(f"Lenght of result: {len(select_result)}")
-    print(f"Type of first element in result: {type(select_result[0])}")
-    print(f"Last element in result: {select_result[-1]}")
+    # print(f"\n\n======== Test SQL Select ========")
+    # print(f"Type of result: {type(select_result)}")
+    # print(f"Lenght of result: {len(select_result)}")
+    # print(f"Type of first element in result: {type(select_result[0])}")
+    # print(f"Last element in result: {select_result[-1]}")
 
 
     # Test Regular SQL commands

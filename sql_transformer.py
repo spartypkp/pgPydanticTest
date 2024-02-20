@@ -62,7 +62,7 @@ def worker(queue):
             break
         assert(LOGGER is not None)
         # Your callback function goes here
-        print(f"Detected change in: {event.src_path}")
+        LOGGER.info(f"Detected change in: {event.src_path}")
 
         # Call apply_codemod.py with the detected filename
         try:
@@ -111,30 +111,30 @@ class SQLTransformer(cst.CSTTransformer):
         self.filename = filepath.split("/")[-1]
         self.filename_without_extension = self.filename.replace(".py", "")
         self.local_cache = {}
+        LOGGER.info(f"SQLTransformer initialized for file: {self.filename}")
 
-        print("SQLTransformer initialized")
     
     def visit_Assign(self, node: cst.Assign) -> None:
         self.node_stack.append(node)
-        print("Visiting Assign")
+        LOGGER.debug(f"Visiting Assign: {node.targets[0].target.value}")
+        
     
     def leave_Call(self, original_node: cst.Call, updated_node: cst.Call) -> cst.Call:
-        func_call = original_node.func
+        
         
         if check_for_valid_sql_invocation(original_node):
-            print("Found sql call")
+            
             sql_string = original_node.args[0].value.value.lstrip('"').rstrip('"')
-            print(f"SQL string: {sql_string}")
+            LOGGER.debug(f"Found SQL string: {sql_string}")
 
             # Inside the Call Node, this gets the parent Assign node
-            if self.stack:
-                last_assign = self.stack[-1]
+            if self.node_stack:
+                last_assign = self.node_stack[-1]
                 
-            new_args = list(original_node.args)
-            new_args[0] = cst.Arg(value=cst.SimpleString(f'"processed!"'))
+            
 
             # Generate the SQL key for this invocation
-            assign_name = last_assign.value.value.lstrip('"').rstrip('"')
+            assign_name = last_assign.targets[0].target.value.lstrip('"').rstrip('"')
             print(f"Assign name: {assign_name}")
             sql_hash = hash(sql_string)
 
@@ -152,19 +152,22 @@ class SQLTransformer(cst.CSTTransformer):
                 "file_defined_in": self.filename,
                 "files_used_in": files_used_in
             }
-
+            cache = None
             # Check if the sql_key is in the cache.json file
             with open("cache.json", "r") as f:
-                cache = json.load(f)
-                # Case: not a completely new invocation
+                text = f.read()
+                cache = json.loads(text)
+                LOGGER.debug(f"Loaded cache: {cache}")
+                # Case 1: not a completely new invocation
                 if sql_key in cache:
-                    # Case: Changed sql, New invocation should override old invocation
-                    if cache["sql_hash"] != sql_hash:
+                    # Case 2: Changed sql, New invocation should override old invocation
+                    if cache[sql_key]["sql_hash"] != sql_hash:
+                        LOGGER.debug(f"Case 2: Changed sql, New invocation should override old invocation")
                         # Update the invocation_metadata in cache.json
                         cache[sql_key] = invocation_metadata
-                    # Case: Unchanged invocation, Do nothing
+                    # Case 3: Unchanged invocation, maybe update files_used_in
                     else:
-                        
+                        LOGGER.debug(f"Case 3: Unchanged invocation, Do nothing")      
                         target_files_used_in = cache[sql_key]["files_used_in"]
                         # Case: File not already in files_used_in
                         if self.filename not in target_files_used_in:
@@ -174,30 +177,32 @@ class SQLTransformer(cst.CSTTransformer):
                             pass
 
                         return updated_node
-                # Case: Completely new invocation
+                # Case 4: Completely new invocation
                 else:
+                    LOGGER.debug(f"Case 4: Completely new invocation")
                     cache[sql_key] = invocation_metadata
 
-            native_sql = f" /* {sql_key} */ {sql_string}"
+            native_sql = f" /* @name{sql_key} */\n{sql_string}"
             
-            invocation_metadata["native_sql"] = native_sql
+            cache[sql_key]["native_sql"] = native_sql
             
             self.local_cache[sql_key] = invocation_metadata
 
+            LOGGER.info(f"Updated cache: {cache}")
             with open("cache.json", "w") as f:
-                f.write(json.dump(cache))
+                f.write(json.dumps(cache))
            
         return updated_node
     
     def leave_Assign(self, original_node: cst.Assign, updated_node: cst.Assign) -> cst.Assign:
-        self.stack.pop()
+        self.node_stack.pop()
         if (
             isinstance(updated_node.value, cst.Call)
             and isinstance(updated_node.value.func, cst.Name)
             and updated_node.value.func.value == "sql"
         ):
             # Get the name of the variable being assigned
-            assign_name = original_node.targets[0].value.value.lstrip('"').rstrip('"')
+            assign_name = original_node.targets[0].target.value.lstrip('"').rstrip('"')
             assign_name = assign_name[0].upper() + assign_name[1:]
             # Create a new AnnAssign node with the modified annotation
             new_annotation = cst.Annotation(
@@ -221,6 +226,14 @@ class SQLTransformer(cst.CSTTransformer):
     def leave_Module(self, original_node: cst.Module, updated_node: cst.Module) -> cst.Module:
         
         converted_filename = self.filename_without_extension + "_temp.sql"
+
+        with open(converted_filename, "w") as f:
+            write_string = ""
+            for k,v in self.local_cache.items():
+                write_string += v["native_sql"]
+            LOGGER.debug(f"Writing to _temp.sql file: {write_string}")
+            f.write(write_string)
+        f.close()
         # Run pgtyped-pydantic to regenerate models
         cfg = 'config.json'
         file_override = converted_filename
@@ -229,10 +242,16 @@ class SQLTransformer(cst.CSTTransformer):
         # Running repository as python subprocess
         command = ['npx', 'pgtyped-pydantic', '-c', cfg, '-f', file_override]
         process = subprocess.run(command, capture_output=True)
+        print(process.stdout)
 
         # Retrieve the updated models from process.stdout, convert to string
         raw_string = process.stdout.decode('utf-8')
+        raw_errors = process.stderr.decode('utf-8')
+        
+        LOGGER.debug(f"Raw pgtyped-pydantic output: {raw_string}")
+        LOGGER.debug(f"Raw pgtyped-pydantic errors: {raw_errors}")
         updated_model_classes = raw_string.split("*** EOF ***")
+        LOGGER.debug(f"Updated model classes: {updated_model_classes}")
         updated_model_classes.pop()
 
         for updated_model in updated_model_classes:
@@ -272,8 +291,9 @@ def apply_codemod_to_file(filepath: str):
     # Apply the codemod
     transformer = SQLTransformer(filepath)
     modified_tree = tree.visit(transformer)
+    LOGGER.info(f"Finished applying codemod to file: {filepath}")
 
-    print(f"\n\n\n\nModified code:\n{modified_tree.code}")
+    LOGGER.debug(f"\n\n\n\nModified code:\n{modified_tree.code}")
 
     # Write the modified code back to the file
     filename_without_extension = transformer.filepath_without_extension
