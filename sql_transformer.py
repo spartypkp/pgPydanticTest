@@ -40,6 +40,7 @@ class SQLTransformer(cst.CSTTransformer):
         self.filepath_without_extension = filepath.replace(".py", "")
         self.filename = filepath.split("/")[-1]
         self.filename_without_extension = self.filename.replace(".py", "")
+        self.local_cache = {}
 
         print("SQLTransformer initialized")
     
@@ -69,12 +70,17 @@ class SQLTransformer(cst.CSTTransformer):
 
             # sql_key:
             # federal_rows,test.py
+            # sql_class = sql("SELECT * FROM table;")
+            # result = sql_class.invoke()
+            files_used_in = []
 
-            sql_key = assign_name + "," + self.filename_without_extension
+            sql_key = assign_name
             invocation_metadata = {
                 "sql_hash": sql_hash,
                 "sql_string": sql_string,
-                "filename": self.filename_without_extension,
+                "native_sql": "",
+                "file_defined_in": self.filename,
+                "files_used_in": files_used_in
             }
 
             # Check if the sql_key is in the cache.json file
@@ -88,53 +94,84 @@ class SQLTransformer(cst.CSTTransformer):
                         cache[sql_key] = invocation_metadata
                     # Case: Unchanged invocation, Do nothing
                     else:
+                        
+                        target_files_used_in = cache[sql_key]["files_used_in"]
+                        # Case: File not already in files_used_in
+                        if self.filename not in target_files_used_in:
+                            cache[sql_key]["files_used_in"].append(self.filename)
+                        # Case: File already in files_used_in, duplicate invocation of same sql in same file
+                        else:
+                            pass
+
                         return updated_node
                 # Case: Completely new invocation
                 else:
                     cache[sql_key] = invocation_metadata
+
+            native_sql = f" /* {sql_key} */ {sql_string}"
             
-
+            invocation_metadata["native_sql"] = native_sql
             
-            
+            self.local_cache[sql_key] = invocation_metadata
 
-            # Run pgtyped-pydantic to regenerate models
-            cfg = 'config.json'
-            file_override = self.sql_filename
-            
-            # Running repository as python subprocess
-            command = ['npx', 'pgtyped-pydantic', '-c', cfg, '-f', file_override]
-            process = subprocess.run(command, capture_output=True)
-
-            # Retrieve the updated models from process.stdout, convert to string
-            updated_models = process.stdout.decode('utf-8')
-
-            # Parse the updated models into a CST
-            updated_models_tree = cst.parse_module(updated_models)
-
-            # Extract each model from the updated models tree
-            updated_models = {"params:": None, "result": None, "invoke": None}
-
-
-
-            
-
-
-
-
-            # If it is, check if the sql_hash is the same
-            
-            # Call pgtyped-pydantic to regenerate models
-        
-        
-        
-
+            with open("cache.json", "w") as f:
+                f.write(json.dump(cache))
+           
         return updated_node
     
     def leave_Assign(self, original_node: cst.Assign, updated_node: cst.Assign) -> cst.Assign:
         self.stack.pop()
+        if (
+            isinstance(updated_node.value, cst.Call)
+            and isinstance(updated_node.value.func, cst.Name)
+            and updated_node.value.func.value == "sql"
+        ):
+            # Get the name of the variable being assigned
+            assign_name = original_node.targets[0].value.value.lstrip('"').rstrip('"')
+            assign_name = assign_name[0].upper() + assign_name[1:] + "Result"
+            # Create a new AnnAssign node with the modified annotation
+            new_annotation = cst.Annotation(
+                    annotation=cst.Subscript(
+                        
+                        value=cst.Name(value="List"),
+                        slice=[
+                            cst.SubscriptElement(
+                                slice=cst.Index(value=cst.Name(value=f"{assign_name}Result"))
+                            )
+                        ],
+                          
+                    )
+                )
+        assign_name = original_node.targets[0].value.value.lstrip('"').rstrip('"')
         return updated_node
     
     def leave_Module(self, original_node: cst.Module, updated_node: cst.Module) -> cst.Module:
+        
+        converted_filename = self.filename_without_extension + "_temp.sql"
+        # Run pgtyped-pydantic to regenerate models
+        cfg = 'config.json'
+        file_override = converted_filename
+
+        
+        # Running repository as python subprocess
+        command = ['npx', 'pgtyped-pydantic', '-c', cfg, '-f', file_override]
+        process = subprocess.run(command, capture_output=True)
+
+        # Retrieve the updated models from process.stdout, convert to string
+        raw_string = process.stdout.decode('utf-8')
+        updated_model_classes = raw_string.split("*** EOF ***")
+        updated_model_classes.pop()
+
+        for updated_model in updated_model_classes:
+            print(updated_model)
+        exit(1)
+
+        # Parse the updated models into a CST
+        updated_models_tree = cst.parse_module(updated_models)
+
+        # Extract each model from the updated models tree
+        updated_models = {"params:": None, "result": None, "invoke": None}
+
         return updated_node
     
 
