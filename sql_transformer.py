@@ -1,36 +1,106 @@
-# apply_codemod.py
 import sys
-
 import libcst as cst
 import libcst.matchers as m
-import json
 import subprocess
+import time
+import threading
+from queue import Queue
+from watchdog.observers import Observer
+from watchdog.events import FileSystemEventHandler
+import subprocess
+import json
+# apply_codemod.py
+import sys
+import subprocess
+import libcst as cst
+from libcst.codemod import CodemodContext
+from libcst.metadata import ParentNodeProvider
+import psycopg
+from psycopg.types.json import Jsonb
+from psycopg.rows import class_row, dict_row
+from typing import List, Any, Optional, TypeVar, Callable, Union, get_args, get_origin
+import pydantic
+import logging
+import os
+DIR = os.path.dirname(os.path.realpath(__file__))
+parent = os.path.dirname(DIR)
+sys.path.append(parent)
+
+LOGGER = None
 
 def main():
-    valid_invocation: cst.SimpleStatementLine = cst.parse_statement("select_result = sql(\"SELECT * FROM us_federal_ecfr WHERE node_type = 'content_type' AND status is NULL LIMIT 5;\")")
-
     
-    invalid_invocation = cst.parse_statement("index = \"test\".find(\"t\")")
+    with open('config.json') as f:
+        config = json.load(f)
+    f.close()
+    srcDir = config['srcDir']
+    create_logger(verbose=True)
     
-    valid_invocation_assign: cst.Assign = valid_invocation.body[0]
-    invalid_invocation_assign = invalid_invocation.body[0]
-    # print(valid_invocation_assign)
-    # print(type(valid_invocation_assign))
-    valid_invocation_call: cst.Call = valid_invocation_assign.value
-    invalid_invocation_call = invalid_invocation_assign.value
+    LOGGER.info(f"Starting watchDawg program.")
+    LOGGER.debug(f"srcDir: {srcDir}")
+    start_watching(srcDir)
 
-    parent = valid_invocation_call
+class PyFileEventHandler(FileSystemEventHandler):
+    def __init__(self, queue):
+        self.queue = queue
 
-    # print(valid_invocation_call)
-    # print(type(valid_invocation_call))
-    valid_check = check_for_valid_sql_invocation(valid_invocation_call)
-    invalid_check = check_for_valid_sql_invocation(invalid_invocation_call)
-    print(f"Guranteed good statement is valid: {valid_check}")
-    print(f"Guranteed bad statement is valid: {invalid_check}")
-    
-    #valid_invocation_call = valid_invocation
-    #is_valid = check_for_sql_call(test_valid_invocation)
-    #print(f"Is valid invocation: {is_valid}")
+    def on_modified(self, event):
+        if event.src_path.endswith('.py'):
+            # If the file modified is this file, don't do anything
+            if "watchDawg" in event.src_path:
+                return
+            # Temporary
+            if "_" in event.src_path:
+                return
+            
+            self.queue.put(event)
+
+def worker(queue):
+    while True:
+        event = queue.get()
+        if event is None:  # None is sent as a signal to stop the worker
+            break
+        assert(LOGGER is not None)
+        # Your callback function goes here
+        print(f"Detected change in: {event.src_path}")
+
+        # Call apply_codemod.py with the detected filename
+        try:
+            apply_codemod_to_file(event.src_path)
+        except Exception as e:
+            # If the type of the Exception is SyntaxError, then the file is already processed. This should be ignored
+            if type(e) == SyntaxError:
+                LOGGER.info(f"File already processed: {event.src_path}. Skipping.")
+            else:
+                LOGGER.exception(f"Error applying codemod to file: {event.src_path}. Error: {e}")
+            
+        
+        queue.task_done()
+
+def start_watching(path):
+    queue = Queue()
+    event_handler = PyFileEventHandler(queue)
+    observer = Observer()
+    observer.schedule(event_handler, path, recursive=True)
+    observer.start()
+
+    worker_thread = threading.Thread(target=worker, args=(queue,))
+    worker_thread.start()
+
+    try:
+        while observer.is_alive():
+            observer.join(1)
+    except KeyboardInterrupt:
+        observer.stop()
+    observer.join()
+
+    # Stop the worker thread
+    queue.put(None)
+    worker_thread.join()
+
+
+# Credit to SeanGrove for the original version of this codemod, G.O.A.T.
+# ================================= CODE MOD ========================================
 
 class SQLTransformer(cst.CSTTransformer):
 
@@ -128,21 +198,24 @@ class SQLTransformer(cst.CSTTransformer):
         ):
             # Get the name of the variable being assigned
             assign_name = original_node.targets[0].value.value.lstrip('"').rstrip('"')
-            assign_name = assign_name[0].upper() + assign_name[1:] + "Result"
+            assign_name = assign_name[0].upper() + assign_name[1:]
             # Create a new AnnAssign node with the modified annotation
             new_annotation = cst.Annotation(
-                    annotation=cst.Subscript(
-                        
+                    annotation=cst.Subscript(     
                         value=cst.Name(value="List"),
                         slice=[
                             cst.SubscriptElement(
-                                slice=cst.Index(value=cst.Name(value=f"{assign_name}Result"))
+                                slice=cst.Index(value=cst.Name(value=assign_name))
                             )
-                        ],
-                          
+                        ],        
                     )
                 )
-        assign_name = original_node.targets[0].value.value.lstrip('"').rstrip('"')
+            return cst.AnnAssign(
+                target=updated_node.targets[0].target,
+                annotation=new_annotation,
+                value=updated_node.value,
+                equal=cst.AssignEqual(),
+            )
         return updated_node
     
     def leave_Module(self, original_node: cst.Module, updated_node: cst.Module) -> cst.Module:
@@ -206,6 +279,44 @@ def apply_codemod_to_file(filepath: str):
     filename_without_extension = transformer.filepath_without_extension
     with open(f"{filename_without_extension}_processed.py", "w") as f:
         f.write(modified_tree.code)
+
+def create_logger(verbose=False):
+    global LOGGER
+    # Ensure the logs directory exists
+    os.makedirs(os.path.join(DIR, 'logs'), exist_ok=True)
+
+    # Create or get the LOGGER
+    LOGGER = logging.getLogger("watchDawg")
+
+    # Optionally clear existing handlers to prevent duplicate messages
+    LOGGER.handlers = []
+
+    # Set the logging level
+    LOGGER.setLevel(logging.DEBUG)
+
+    # Create handlers (file and console)
+    file_handler = logging.FileHandler(f"{DIR}/logs/watchDawg.log", mode="w")
+
+    # Create a logging format
+    formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s (%(filename)s:%(lineno)d)')
+    file_handler.setFormatter(formatter)
+
+    # Add file handler to the LOGGER
+    LOGGER.addHandler(file_handler)
+
+    console_handler = logging.StreamHandler(sys.stdout)
+    console_handler.setFormatter(formatter)
+    console_handler.setLevel(logging.INFO)
+    console_handler.filter(lambda record: record.levelno >= logging.INFO)
+    if verbose:
+        # Create console handler with a higher log level
+        console_handler.setLevel(logging.DEBUG)
+        console_handler.filter(lambda record: record.levelno >= logging.DEBUG)
+
+    # Add console handler to the LOGGER
+    LOGGER.addHandler(console_handler)
+    LOGGER.info("Logger Created")
+
 
 if __name__ == "__main__":
     main()
