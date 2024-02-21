@@ -11,15 +11,17 @@ from typing import List
     # - This should be done in leave_module
     # - If there is a difference, then update the _models file, replace the cache,json file key/values for all objects with same file value
 
+    
 
 
 
 def main():
     print("File for testing pgtyped-pydantic")
-
+    print()
     # Test SQL SELECT, modify below comment for quick testing.  
-    # select_result = sql("SELECT * FROM us_federal_ecfr WHERE node_type = 'content' AND status is NULL LIMIT 5;", "SelectFederalRows") try againnnnnnnnnnnnnnnnnnnnnnnnnnnnnnn
+    # select_result = sql("SELECT * FROM us_federal_ecfr WHERE node_type = 'content' AND status is NULL LIMIT 5;", "SelectFederalRows") try againnnnnnnnnnnnnnnnnnnn
     select_federal_rows = sql("SELECT * FROM us_federal_ecfr WHERE node_type = 'content_type' AND status is NULL LIMIT 5;")
+    result = select_federal_rows.run()
 
     
     # print(f"\n\n======== Test SQL Select ========")

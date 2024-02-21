@@ -1,23 +1,65 @@
-# Pydantic models generated for queries found in /Users/s/VSCodeProjects/pgPydanticTest/test.py
-from pydantic import BaseModel, Field
-from typing import Optional, List, Any, Dict, Union 
-
+import datetime
+from typing import Any, Dict, List, Optional
+from pydantic import BaseModel
 from typing_extensions import NewType
 
-from datetime import datetime
+class selectFederalRows:
+	""" 
+	Class to hold all pydantic models for a single SQL query.
+	Defined by SQL invocation in test.py.
+	Original SQL: "SELECT * FROM us_federal_ecfr WHERE node_type = 'content_type' AND status is NULL LIMIT 5"
+	Used in files: []
+	"""
 
-# Query 'SelectFederalRows' is invalid, so its result is assigned type 'Any'.
- *  */
-SelectFederalRowsResult = NewType('SelectFederalRowsResult', Any)
+	""" 'SelectFederalRows' parameters type """
+	SelectFederalRowsParams = NewType('SelectFederalRowsParams', None)
 
-# Query 'SelectFederalRows' is invalid, so its parameters are assigned type 'Any'.
- *  */
-SelectFederalRowsParams = NewType('SelectFederalRowsParams', Any)
+	""" 'SelectFederalRows' return type """
+	class SelectFederalRowsResult (BaseModel):
+		addendum: Optional[List[str]]
+		addendum_metadata: Optional[Dict[str, Any]]
+		addendum_references: Optional[Dict[str, Any]]
+		agency: Optional[str]
+		alias: Optional[str]
+		authority: Optional[str]
+		citation: str
+		core_metadata: Optional[Dict[str, Any]]
+		core_references: Optional[Dict[str, Any]]
+		date_created: Optional[datetime.datetime]
+		date_modified: Optional[datetime.datetime]
+		dates: Optional[Dict[str, Any]]
+		definitions: Optional[Dict[str, Any]]
+		direct_children: Optional[List[str]]
+		history: Optional[str]
+		hyde: Optional[List[str]]
+		hyde_embedding: Optional[str]
+		id: str
+		incoming_references: Optional[Dict[str, Any]]
+		level_classifier: str
+		lineage: Optional[List[str]]
+		lineage_embedding: Optional[str]
+		link: Optional[str]
+		node_name: Optional[str]
+		node_text: Optional[List[str]]
+		node_type: str
+		number: Optional[str]
+		parent: Optional[str]
+		processing: Optional[Dict[str, Any]]
+		siblings: Optional[List[str]]
+		source: Optional[str]
+		status: Optional[str]
+		summary: Optional[str]
+		summary_embedding: Optional[str]
+		text_embedding: Optional[str]
+		top_level_title: Optional[str]
+		topics: Optional[Dict[str, Any]]
 
 
 
 
-def SelectFederalRows(params: SelectFederalRowsParams) -> List[SelectFederalRowsResult]:
-    return True # Will figure this out later
-
+	def run(self, params: SelectFederalRowsParams) -> List[SelectFederalRowsResult]:
+		""" 
+		Method to run the sql query.
+		"""
+		return []
 

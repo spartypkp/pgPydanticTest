@@ -182,7 +182,7 @@ class SQLTransformer(cst.CSTTransformer):
                     LOGGER.debug(f"Case 4: Completely new invocation")
                     cache[sql_key] = invocation_metadata
 
-            native_sql = f" /* @name{sql_key} */\n{sql_string}"
+            native_sql = f"/* @name{sql_key} */\n{sql_string}"
             
             cache[sql_key]["native_sql"] = native_sql
             
@@ -242,7 +242,7 @@ class SQLTransformer(cst.CSTTransformer):
         # Running repository as python subprocess
         command = ['npx', 'pgtyped-pydantic', '-c', cfg, '-f', file_override]
         process = subprocess.run(command, capture_output=True)
-        print(process.stdout)
+       
 
         # Retrieve the updated models from process.stdout, convert to string
         raw_string = process.stdout.decode('utf-8')
@@ -250,13 +250,24 @@ class SQLTransformer(cst.CSTTransformer):
         
         LOGGER.debug(f"Raw pgtyped-pydantic output: {raw_string}")
         LOGGER.debug(f"Raw pgtyped-pydantic errors: {raw_errors}")
-        updated_model_classes = raw_string.split("*** EOF ***")
+        updated_model_classes = raw_string.replace("    ", "\t").split("### EOF ###")
         LOGGER.debug(f"Updated model classes: {updated_model_classes}")
         updated_model_classes.pop()
 
-        for updated_model in updated_model_classes:
-            print(updated_model)
+        
+        # Mode 1: Write the updated modesl to a new file, corresponding to each scanned file
+        with open(f"{self.filename_without_extension}_models.py", "w") as f:
+            for updated_model in updated_model_classes:
+                f.write(updated_model)
+        f.close()
         exit(1)
+        # Mode 2: Write the updated models to a single file, corresponding to all scanned files
+        for updated_model in updated_model_classes:
+            # Extract the updated model as a CST
+            tree = cst.parse_module(updated_model)
+            # Find if a CST exists in generated_models.py with the same name as the updated model
+            transformer = None
+        
 
         # Parse the updated models into a CST
         updated_models_tree = cst.parse_module(updated_models)
