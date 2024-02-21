@@ -161,7 +161,11 @@ class SQLTransformer(cst.CSTTransformer):
                 LOGGER.debug(f"Loaded cache: {cache}")
                 # Case 1: not a completely new invocation
                 if sql_key in cache:
+                    print(f"Cache for sql_key: {sql_key} exists:\n{cache[sql_key]}")
+                    LOGGER.debug(f"Local cache for sql_key: {sql_key} exists:\n{self.local_cache[sql_key]}")
                     # Case 2: Changed sql, New invocation should override old invocation
+                    
+
                     if cache[sql_key]["sql_hash"] != sql_hash:
                         LOGGER.debug(f"Case 2: Changed sql, New invocation should override old invocation")
                         # Update the invocation_metadata in cache.json
@@ -183,7 +187,7 @@ class SQLTransformer(cst.CSTTransformer):
                     LOGGER.debug(f"Case 4: Completely new invocation")
                     cache[sql_key] = invocation_metadata
 
-            native_sql = f"/* @name{sql_key} */\n{sql_string}"
+            native_sql = f"/* @name {sql_key} */\n{sql_string}"
             
             cache[sql_key]["native_sql"] = native_sql
             
@@ -206,16 +210,8 @@ class SQLTransformer(cst.CSTTransformer):
             assign_name = original_node.targets[0].target.value.lstrip('"').rstrip('"')
             assign_name = assign_name[0].upper() + assign_name[1:]
             # Create a new AnnAssign node with the modified annotation
-            new_annotation = cst.Annotation(
-                    annotation=cst.Subscript(     
-                        value=cst.Name(value="List"),
-                        slice=[
-                            cst.SubscriptElement(
-                                slice=cst.Index(value=cst.Name(value=assign_name))
-                            )
-                        ],        
-                    )
-                )
+            new_annotation = cst.Annotation(  cst.Name(value=assign_name))
+            
             return cst.AnnAssign(
                 target=updated_node.targets[0].target,
                 annotation=new_annotation,
@@ -251,43 +247,72 @@ class SQLTransformer(cst.CSTTransformer):
         
         LOGGER.debug(f"Raw pgtyped-pydantic output: {raw_string}")
         LOGGER.debug(f"Raw pgtyped-pydantic errors: {raw_errors}")
-        updated_model_classes = raw_string.replace("    ", "\t").split("### EOF ###")
-        LOGGER.debug(f"Updated model classes: {updated_model_classes}")
-        updated_model_classes.pop()
+        updated_model_classes_raw = raw_string.replace("    ", "\t").split("### EOF ###")
+        LOGGER.debug(f"Updated model classes: {updated_model_classes_raw}")
+        updated_model_classes_raw.pop()
+        updated_model_classes: List[cst.Module] = []
+        for i, model in enumerate(updated_model_classes_raw):
+            updated_model_classes.append(cst.parse_module(model))
 
         
-        # Mode 1: Write the updated modesl to a new file, corresponding to each scanned file
-        # with open(f"{self.filename_without_extension}_models.py", "w") as f:
-        #     for updated_model in updated_model_classes:
-        #         f.write(updated_model)
-        # f.close()
-        
-        # Mode 2: Write the updated models to a single file, corresponding to all scanned files
-        source_code = ""
-        with open("generated_models.py", "r") as file:
-            source_code = file.read()
-        
+        with open("config.json", "r") as f:
+            config = json.load(f)
+        f.close()
+        output_mode = config["outputMode"]
 
-        # Parse the source code into a CST
-        tree = cst.parse_module(source_code)
+        # "default" Mode: Write the updated modesl to a new file, corresponding to each scanned file
+        if output_mode != "monorepo":
+            output_filename = f"{self.filename_without_extension}_models"
+            with open(f"{output_filename}.py", "w") as f:
+                for updated_model in updated_model_classes:
+                    f.write(updated_model.code)
+            f.close()
         
-        # Apply the codemod
-        transformer = ModelTransformer(updated_nodes=updated_model_classes)
-        modified_tree = tree.visit(transformer)
-
-        modified_tree = add_module(updated_model_classes, modified_tree)
-
-        
-        #print(f"\n\n\n\nModified code:\n{modified_tree.code}")
-
-        with open("generated_models.py", "w") as file:
-            file.write(modified_tree.code)
-        file.close()
+        # "monorepo" Mode: Write the updated models to a single file, corresponding to all scanned files
+        else:
+            source_code = ""
+            with open("generated_models.py", "r") as file:
+                source_code = file.read()
+            file.close()
         
 
+            # Parse the source code into a CST
+            intermediate_tree = cst.parse_module(source_code)
+            
+            # Apply the codemod
+            model_transformer = ModelTransformer(updated_nodes=updated_model_classes)
+            updated_intermediate_tree = intermediate_tree.visit(model_transformer)
+
+            updated_intermediate_tree = add_module(updated_model_classes, updated_intermediate_tree)
+
+            
+            #print(f"\n\n\n\nModified code:\n{modified_tree.code}")
+            print(type(updated_intermediate_tree))
+            with open("generated_models.py", "w") as file:
+                file.write(updated_intermediate_tree.code)
+            file.close()
+            output_filename = "generated_models"
+        names = []
+        for k, v in self.local_cache.items():
+            
+            
+            function_name = k[0].upper() + k[1:]
+            names.append(cst.ImportAlias(name=cst.Name(f"{function_name}")))
+            
+        new_import = cst.ImportFrom(
+            module=cst.Name(output_filename),
+            names=names,
+        )
+        # If nothing was added, return the original node
+        if len(names) == 0:
+            return original_node
+
+
+        # Add a newline after the imports
+        new_imports = [new_import, cst.EmptyLine(), cst.EmptyLine()]
         # Remove the temporary file
         os.remove(converted_filename)
-
+        updated_node.body = new_imports + list(updated_node.body)
         return updated_node
     
 
@@ -320,7 +345,7 @@ def apply_codemod_to_file(filepath: str):
     LOGGER.debug(f"\n\n\n\nModified code:\n{modified_tree.code}")
 
     # Write the modified code back to the file
-    
+
     filename_without_extension = transformer.filepath_without_extension
     with open(f"{filename_without_extension}_processed.py", "w") as f:
         f.write(modified_tree.code)

@@ -14,5 +14,7 @@
     "user": "s",
     "dbName": "s",
     "password": ""
-  }
+  },
+  
+  "outputMode": "single"
 }

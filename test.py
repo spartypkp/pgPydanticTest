@@ -19,9 +19,10 @@ def main():
     print("File for testing pgtyped-pydantic")
     print()
     # Test SQL SELECT, modify below comment for quick testing.  
-    # select_result = sql("SELECT * FROM us_federal_ecfr WHERE node_type = 'content' AND status is NULL LIMIT 5;", "SelectFederalRows") try againnnnnnnnnnnnnnnnnnnn
-    select_federal_rows = sql("SELECT * FROM us_federal_ecfr WHERE node_type = 'content_type' AND status is NULL LIMIT 5;")
-    result = select_federal_rows.run()
+    # select_result = sql("SELECT * FROM us_federal_ecfr WHERE node_type = 'content' AND status is NULL LIMIT 5;", "SelectFederalRows") try againnnnnnnnnnnnnnnnnnnnnnnnnnn
+    select_federal_rows = sql("SELECT * FROM us_federal_ecfr WHERE node_type = 'content' AND status is NULL LIMIT 5;")
+    select_bad_rows = sql("SELECT * FROM us_federal_ecfr WHERE node_type = 'content' AND status is not NULL LIMIT 5;")
+    
 
     
     # print(f"\n\n======== Test SQL Select ========")
