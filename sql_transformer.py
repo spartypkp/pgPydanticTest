@@ -22,6 +22,7 @@ from typing import List, Any, Optional, TypeVar, Callable, Union, get_args, get_
 import pydantic
 import logging
 import os
+from model_transformer import ModelTransformer, add_module
 DIR = os.path.dirname(os.path.realpath(__file__))
 parent = os.path.dirname(DIR)
 sys.path.append(parent)
@@ -256,24 +257,36 @@ class SQLTransformer(cst.CSTTransformer):
 
         
         # Mode 1: Write the updated modesl to a new file, corresponding to each scanned file
-        with open(f"{self.filename_without_extension}_models.py", "w") as f:
-            for updated_model in updated_model_classes:
-                f.write(updated_model)
-        f.close()
-        exit(1)
+        # with open(f"{self.filename_without_extension}_models.py", "w") as f:
+        #     for updated_model in updated_model_classes:
+        #         f.write(updated_model)
+        # f.close()
+        
         # Mode 2: Write the updated models to a single file, corresponding to all scanned files
-        for updated_model in updated_model_classes:
-            # Extract the updated model as a CST
-            tree = cst.parse_module(updated_model)
-            # Find if a CST exists in generated_models.py with the same name as the updated model
-            transformer = None
+        source_code = ""
+        with open("generated_models.py", "r") as file:
+            source_code = file.read()
         
 
-        # Parse the updated models into a CST
-        updated_models_tree = cst.parse_module(updated_models)
+        # Parse the source code into a CST
+        tree = cst.parse_module(source_code)
+        
+        # Apply the codemod
+        transformer = ModelTransformer(updated_nodes=updated_model_classes)
+        modified_tree = tree.visit(transformer)
 
-        # Extract each model from the updated models tree
-        updated_models = {"params:": None, "result": None, "invoke": None}
+        modified_tree = add_module(updated_model_classes, modified_tree)
+
+        
+        #print(f"\n\n\n\nModified code:\n{modified_tree.code}")
+
+        with open("generated_models.py", "w") as file:
+            file.write(modified_tree.code)
+        file.close()
+        
+
+        # Remove the temporary file
+        os.remove(converted_filename)
 
         return updated_node
     
@@ -307,6 +320,7 @@ def apply_codemod_to_file(filepath: str):
     LOGGER.debug(f"\n\n\n\nModified code:\n{modified_tree.code}")
 
     # Write the modified code back to the file
+    
     filename_without_extension = transformer.filepath_without_extension
     with open(f"{filename_without_extension}_processed.py", "w") as f:
         f.write(modified_tree.code)
