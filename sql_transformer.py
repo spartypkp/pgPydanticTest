@@ -44,8 +44,11 @@ def main():
 class PyFileEventHandler(FileSystemEventHandler):
     def __init__(self, queue):
         self.queue = queue
+        self.previous_write_file = ""
 
     def on_modified(self, event):
+        if "config.json" in event.src_path:
+            raise Exception("config.json was modified. Please restart the program.")
         if event.src_path.endswith('.py'):
             # If the file modified is this file, don't do anything
             if "watchDawg" in event.src_path:
@@ -57,6 +60,7 @@ class PyFileEventHandler(FileSystemEventHandler):
             self.queue.put(event)
 
 def worker(queue):
+    previous_write_file = ""
     while True:
         event = queue.get()
         if event is None:  # None is sent as a signal to stop the worker
@@ -64,10 +68,17 @@ def worker(queue):
         assert(LOGGER is not None)
         # Your callback function goes here
         LOGGER.info(f"Detected change in: {event.src_path}")
+        
+        if event.src_path == previous_write_file:
+            LOGGER.critical(f"Change corresponds to previous write: {previous_write_file}. Skipping.")
+            previous_write_file = ""
+            queue.task_done()
+            continue
 
         # Call apply_codemod.py with the detected filename
         try:
-            apply_codemod_to_file(event.src_path)
+            target_write_file = apply_codemod_to_file(event.src_path)
+            previous_write_file = target_write_file
         except Exception as e:
             # If the type of the Exception is SyntaxError, then the file is already processed. This should be ignored
             if type(e) == SyntaxError:
@@ -115,9 +126,18 @@ class SQLTransformer(cst.CSTTransformer):
         LOGGER.info(f"SQLTransformer initialized for file: {self.filename}")
 
     
-    def visit_Assign(self, node: cst.Assign) -> None:
+    def handle_assignment(self, node: Union[cst.Assign, cst.AnnAssign]) -> None:
         self.node_stack.append(node)
+
+    def visit_Assign(self, node: cst.Assign) -> None:
+        self.handle_assignment(node)
         LOGGER.debug(f"Visiting Assign: {node.targets[0].target.value}")
+
+    def visit_AnnAssign(self, node: cst.AnnAssign) -> None:
+        self.handle_assignment(node)
+        LOGGER.debug(f"Visiting AnnAssign: {node.target.value}")
+        LOGGER.debug(f"Current Annotation: {node.annotation.annotation.value}")
+
         
     
     def leave_Call(self, original_node: cst.Call, updated_node: cst.Call) -> cst.Call:
@@ -125,7 +145,7 @@ class SQLTransformer(cst.CSTTransformer):
         
         if check_for_valid_sql_invocation(original_node):
             
-            sql_string = original_node.args[0].value.value.lstrip('"').rstrip('"')
+            sql_string = updated_node.args[0].value.value.lstrip('"').rstrip('"')
             LOGGER.debug(f"Found SQL string: {sql_string}")
 
             # Inside the Call Node, this gets the parent Assign node
@@ -135,8 +155,13 @@ class SQLTransformer(cst.CSTTransformer):
             
 
             # Generate the SQL key for this invocation
-            assign_name = last_assign.targets[0].target.value.lstrip('"').rstrip('"')
-            print(f"Assign name: {assign_name}")
+            if isinstance(last_assign, cst.AnnAssign):
+                assign_name_raw = last_assign.target.value.lstrip('"').rstrip('"')
+            else:
+                assign_name_raw = last_assign.targets[0].target.value.lstrip('"').rstrip('"')
+            LOGGER.debug(f"Assign name raw: {assign_name_raw}")
+            assign_name = pascal_case(assign_name_raw)
+            LOGGER.debug(f"Pascal Assign name: {assign_name}")
             sql_hash = hash(sql_string)
 
             # sql_key:
@@ -146,6 +171,7 @@ class SQLTransformer(cst.CSTTransformer):
             files_used_in = []
 
             sql_key = assign_name
+            LOGGER.debug(f"SQL key: {sql_key}")
             invocation_metadata = {
                 "sql_hash": sql_hash,
                 "sql_string": sql_string,
@@ -161,13 +187,12 @@ class SQLTransformer(cst.CSTTransformer):
                 LOGGER.debug(f"Loaded cache: {cache}")
                 # Case 1: not a completely new invocation
                 if sql_key in cache:
-                    print(f"Cache for sql_key: {sql_key} exists:\n{cache[sql_key]}")
-                    LOGGER.debug(f"Local cache for sql_key: {sql_key} exists:\n{self.local_cache[sql_key]}")
+                    LOGGER.debug(f"Cache for sql_key: {sql_key} exists:\n{cache[sql_key]}")
                     # Case 2: Changed sql, New invocation should override old invocation
-                    
 
-                    if cache[sql_key]["sql_hash"] != sql_hash:
+                    if cache[sql_key]["sql_string"] != sql_string:
                         LOGGER.debug(f"Case 2: Changed sql, New invocation should override old invocation")
+                        LOGGER.critical(f"Warning! You are overriding an existing SQL invocation, which will regenerate the models. If you want to keep the old models with the same name, please change the variable name you are assinging to.")
                         # Update the invocation_metadata in cache.json
                         cache[sql_key] = invocation_metadata
                     # Case 3: Unchanged invocation, maybe update files_used_in
@@ -208,7 +233,8 @@ class SQLTransformer(cst.CSTTransformer):
         ):
             # Get the name of the variable being assigned
             assign_name = original_node.targets[0].target.value.lstrip('"').rstrip('"')
-            assign_name = assign_name[0].upper() + assign_name[1:]
+            assign_name = pascal_case(assign_name)
+            
             # Create a new AnnAssign node with the modified annotation
             new_annotation = cst.Annotation(  cst.Name(value=assign_name))
             
@@ -223,11 +249,13 @@ class SQLTransformer(cst.CSTTransformer):
     def leave_Module(self, original_node: cst.Module, updated_node: cst.Module) -> cst.Module:
         
         converted_filename = self.filename_without_extension + "_temp.sql"
-
+        if len(self.local_cache.keys()) == 0:
+            LOGGER.info(f"No new or updated SQL invocations found in file.")
+            return updated_node
         with open(converted_filename, "w") as f:
             write_string = ""
             for k,v in self.local_cache.items():
-                write_string += v["native_sql"]
+                write_string += v["native_sql"] + "\n\n"
             LOGGER.debug(f"Writing to _temp.sql file: {write_string}")
             f.write(write_string)
         f.close()
@@ -245,28 +273,43 @@ class SQLTransformer(cst.CSTTransformer):
         raw_string = process.stdout.decode('utf-8')
         raw_errors = process.stderr.decode('utf-8')
         
-        LOGGER.debug(f"Raw pgtyped-pydantic output: {raw_string}")
+        #LOGGER.debug(f"Raw pgtyped-pydantic output: {raw_string}")
         LOGGER.debug(f"Raw pgtyped-pydantic errors: {raw_errors}")
         updated_model_classes_raw = raw_string.replace("    ", "\t").split("### EOF ###")
         LOGGER.debug(f"Updated model classes: {updated_model_classes_raw}")
         updated_model_classes_raw.pop()
-        updated_model_classes: List[cst.Module] = []
+        updated_model_classes: List[cst.ClassDef] = []
         for i, model in enumerate(updated_model_classes_raw):
-            updated_model_classes.append(cst.parse_module(model))
+            as_module = cst.parse_module(model)
+            as_class = as_module.body[0]
+            updated_model_classes.append(as_class)
 
         
         with open("config.json", "r") as f:
             config = json.load(f)
         f.close()
         output_mode = config["outputMode"]
-
+        skip_model_transformer = False
         # "default" Mode: Write the updated modesl to a new file, corresponding to each scanned file
         if output_mode != "monorepo":
+            LOGGER.debug(f"Output mode: {output_mode}")
             output_filename = f"{self.filename_without_extension}_models"
-            with open(f"{output_filename}.py", "w") as f:
-                for updated_model in updated_model_classes:
-                    f.write(updated_model.code)
-            f.close()
+            try:
+                with open(f"{output_filename}.py", "r") as f:
+                    source_code = f.read()
+                f.close()
+                LOGGER.debug(f"Retrieved source code from {output_filename}.py")
+            except:
+                source_code = "from typing import List, Optional, Dict, Any, NewType\nimport datetime\nfrom pydantic import BaseModel\nfrom typing_extensions import NewType\n\n"
+                for mod in updated_model_classes:
+                    source_code += mod.code
+                # File does not exist yet, create it
+                with open(f"{output_filename}.py", "w") as f:
+                    f.write(source_code)
+                f.close()
+                skip_model_transformer = True
+                LOGGER.debug(f"Created new file: {output_filename}.py. Wrote updated models to file. SKIPPING MODEL TRANSFORMER")
+
         
         # "monorepo" Mode: Write the updated models to a single file, corresponding to all scanned files
         else:
@@ -274,30 +317,34 @@ class SQLTransformer(cst.CSTTransformer):
             with open("generated_models.py", "r") as file:
                 source_code = file.read()
             file.close()
+            LOGGER.debug(f"Retrieved source code from generated_models.py")
+            output_filename = "generated_models"
         
-
+        # Run the model transformer to update the already created _models file
+        if not skip_model_transformer:
             # Parse the source code into a CST
             intermediate_tree = cst.parse_module(source_code)
             
             # Apply the codemod
-            model_transformer = ModelTransformer(updated_nodes=updated_model_classes)
+            model_transformer = ModelTransformer(updated_classes=updated_model_classes)
             updated_intermediate_tree = intermediate_tree.visit(model_transformer)
 
             updated_intermediate_tree = add_module(updated_model_classes, updated_intermediate_tree)
 
             
             #print(f"\n\n\n\nModified code:\n{modified_tree.code}")
-            print(type(updated_intermediate_tree))
-            with open("generated_models.py", "w") as file:
+            
+            with open(f"{output_filename}.py", "w") as file:
                 file.write(updated_intermediate_tree.code)
             file.close()
-            output_filename = "generated_models"
+        
+
+        # Regardless of output mode, update the imports in the scanned file
         names = []
         for k, v in self.local_cache.items():
             
             
-            function_name = k[0].upper() + k[1:]
-            names.append(cst.ImportAlias(name=cst.Name(f"{function_name}")))
+            names.append(cst.ImportAlias(name=cst.Name(k)))
             
         new_import = cst.ImportFrom(
             module=cst.Name(output_filename),
@@ -312,7 +359,7 @@ class SQLTransformer(cst.CSTTransformer):
         new_imports = [new_import, cst.EmptyLine(), cst.EmptyLine()]
         # Remove the temporary file
         os.remove(converted_filename)
-        updated_node.body = new_imports + list(updated_node.body)
+        updated_node = updated_node.with_changes(body=new_imports + list(updated_node.body))
         return updated_node
     
 
@@ -330,7 +377,7 @@ def check_for_valid_sql_invocation(node: cst.Call) -> bool:
     return True
 
 
-def apply_codemod_to_file(filepath: str):
+def apply_codemod_to_file(filepath: str) -> str:
     with open(filepath, "r") as f:
         source_code = f.read()
 
@@ -341,14 +388,30 @@ def apply_codemod_to_file(filepath: str):
     transformer = SQLTransformer(filepath)
     modified_tree = tree.visit(transformer)
     LOGGER.info(f"Finished applying codemod to file: {filepath}")
-
+    if source_code == modified_tree.code:
+        LOGGER.info(f"No changes made to file: {filepath}")
+        return ""
+    
     LOGGER.debug(f"\n\n\n\nModified code:\n{modified_tree.code}")
 
-    # Write the modified code back to the file
+    # Write the modified code back to the correct file, based on config
+    with open("config.json", "r") as f:
+        config = json.load(f)
+    f.close()
+    generate_new_file = config["write_changes_to_new_file"]
+    LOGGER.debug(f"Write modified file to new file: {generate_new_file}")
 
-    filename_without_extension = transformer.filepath_without_extension
-    with open(f"{filename_without_extension}_processed.py", "w") as f:
+    filepath_without_extension = transformer.filepath_without_extension
+    if generate_new_file:
+        target_write_file = f"{filepath_without_extension}_processed.py"
+    else:
+        target_write_file = f"{filepath_without_extension}.py"
+
+    LOGGER.debug(f"Writing modified code to: {target_write_file}")
+    with open(target_write_file, "w") as f:
         f.write(modified_tree.code)
+    f.close()
+    return target_write_file
 
 def create_logger(verbose=False):
     global LOGGER
@@ -368,7 +431,7 @@ def create_logger(verbose=False):
     file_handler = logging.FileHandler(f"{DIR}/logs/watchDawg.log", mode="w")
 
     # Create a logging format
-    formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s (%(filename)s:%(lineno)d)')
+    formatter = logging.Formatter('%(name)s - %(levelname)s - %(asctime)s: \n%(message)s \nSource:(%(filename)s:%(lineno)d)\n')
     file_handler.setFormatter(formatter)
 
     # Add file handler to the LOGGER
@@ -388,5 +451,10 @@ def create_logger(verbose=False):
     LOGGER.info("Logger Created")
 
 
+def pascal_case(name: str) -> str:
+    # Example input: "select_federal_rows"
+    # Example output: "SelectFederalRows"
+    return "".join(map(str.title, name.split("_")))
+    
 if __name__ == "__main__":
     main()

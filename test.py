@@ -1,6 +1,11 @@
+
+from test_models import SelectFederalRows
+
+from test_models import SelectFederalRows, SelectBadRows
+
 from watchDawg import sql
 from typing import List
-
+import libcst as cst
 
 # Watch for changes in all .py file
 # Regenerate all models using pgtyped-pydantic
@@ -19,9 +24,13 @@ def main():
     print("File for testing pgtyped-pydantic")
     print()
     # Test SQL SELECT, modify below comment for quick testing.  
-    # select_result = sql("SELECT * FROM us_federal_ecfr WHERE node_type = 'content' AND status is NULL LIMIT 5;", "SelectFederalRows") try againnnnnnnnnnnnnnnnnnnnnnnnnnn
-    select_federal_rows = sql("SELECT * FROM us_federal_ecfr WHERE node_type = 'content' AND status is NULL LIMIT 5;")
-    select_bad_rows = sql("SELECT * FROM us_federal_ecfr WHERE node_type = 'content' AND status is not NULL LIMIT 5;")
+    # select_result = sql("SELECT * FROM us_federal_ecfr WHERE node_type = 'content' AND status is NULL LIMIT 5;", "SelectFederalRows") try againnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnn
+    select_federal_rows: SelectFederalRows = sql("SELECT * FROM us_federal_ecfr WHERE node_type = 'content' AND status is NULL LIMIT 7;")
+    select_bad_rows: SelectBadRows = sql("SELECT * FROM us_federal_ecfr WHERE node_type = 'content' AND status is not NULL LIMIT 10;")
+
+    # with open("TESTOUTPUT.txt", "w") as file:
+    #     file.write(str(cst.parse_module("""select_federal_rows: SelectFederalRows = sql(\"SELECT * FROM us_federal_ecfr WHERE node_type = 'content' AND status is NULL LIMIT 5;\")\nselect_bad_rows: SelectBadRows = sql(\"SELECT * FROM us_federal_ecfr WHERE node_type = 'content' AND status is not NULL LIMIT 5;\")""")))
+    # file.close()
     
 
     

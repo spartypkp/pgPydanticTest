@@ -4,8 +4,8 @@ from typing import List
 	
 class ModelTransformer(cst.CSTTransformer):
     
-	def __init__(self, updated_nodes: list):
-		self.updated_nodes = updated_nodes
+	def __init__(self, updated_classes: List[cst.ClassDef]):
+		self.updated_classes = updated_classes
     
 	def on_visit(self, node: cst.CSTNode) -> bool:
 		return True
@@ -13,27 +13,30 @@ class ModelTransformer(cst.CSTTransformer):
 	def on_leave(self, original_node: cst.CSTNode, updated_node: cst.CSTNode) -> cst.CSTNode:
 		#print(f"Visiting node: {original_node}")
 		#print(f"Length of updated_nodes: {len(self.updated_nodes)}")
-		if len(self.updated_nodes) == 0:
+		if len(self.updated_classes) == 0:
 			return updated_node
 		
 		if isinstance(original_node, cst.ClassDef):
+			print("Found a class definition: ", original_node.name)
 			removal_index = -1
-			for i, node in enumerate(self.updated_nodes):
+			for i, node in enumerate(self.updated_classes):
 				#print(type(node))
 				#print(node)
-
+				with open("TESTOUTPUT.txt", "w") as file:
+					file.write(str(node))
+				print(node.name)
 				if node.name.value == original_node.name.value:
 					#print(f"Found a match: {node.name.value} == {original_node.name.value}")
 					removal_index = i
 					updated_node = node
 					break
 			if removal_index != -1:
-				self.updated_nodes.pop(removal_index)
+				self.updated_classes.pop(removal_index)
 			else:
 				pass
 		return updated_node
 
-def add_module(to_add: List[cst.Module], module_to_update: cst.Module):
+def add_module(to_add: List[cst.ClassDef], module_to_update: cst.Module):
     # Append the new modules to the end of the existing module
     new_body = list(module_to_update.body)
     for new_module in to_add:

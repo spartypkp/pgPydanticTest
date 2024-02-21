@@ -16,5 +16,7 @@
     "password": ""
   },
   
-  "outputMode": "single"
+  "outputMode": "single",
+  "generated_model_naming": "PascalCase",
+  "write_changes_to_new_file": false
 }
