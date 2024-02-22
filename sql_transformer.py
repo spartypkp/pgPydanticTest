@@ -21,6 +21,7 @@ from psycopg.rows import class_row, dict_row
 from typing import List, Any, Optional, TypeVar, Callable, Union, get_args, get_origin
 import pydantic
 import logging
+import inspect
 import os
 from model_transformer import ModelTransformer, add_module
 DIR = os.path.dirname(os.path.realpath(__file__))
@@ -300,9 +301,9 @@ class SQLTransformer(cst.CSTTransformer):
                 f.close()
                 LOGGER.debug(f"Retrieved source code from {output_filename}.py")
             except:
-                source_code = "from typing import List, Optional, Dict, Any, NewType\nimport datetime\nfrom pydantic import BaseModel\nfrom typing_extensions import NewType\n\n"
-                for mod in updated_model_classes:
-                    source_code += mod.code
+                source_code = "from typing import List, Optional, Dict, Any, Union\nimport datetime\nfrom pydantic import BaseModel\nfrom typing_extensions import NewType\nfrom psycopg.rows import class_row\nimport psycopg\nfrom sql_transformer import sql_executor\n\n"
+                for mod in updated_model_classes_raw:
+                    source_code += mod
                 # File does not exist yet, create it
                 with open(f"{output_filename}.py", "w") as f:
                     f.write(source_code)
@@ -450,6 +451,55 @@ def create_logger(verbose=False):
     LOGGER.addHandler(console_handler)
     LOGGER.info("Logger Created")
 
+
+import inspect
+
+T = TypeVar('T')
+def sql(query: str) -> T:
+    # Get the filename of the file that called this function
+    with open("cache.json", "r") as f:
+        cache = json.load(f)
+
+    # Get the name of the ClassDef
+    class_name = None
+    for k, v in cache.items():
+        if query == v['sql_string']:
+            class_name = k
+            break
+
+    if class_name is None:
+        raise ValueError(f"No class found for query: {query}")
+
+    # Get the caller's global symbol table
+    caller_globals = inspect.stack()[1][0].f_globals
+
+    # Get the class from the caller's global symbol table
+    class_def = caller_globals.get(class_name)
+
+    if class_def is None:
+        raise ValueError(f"Class {class_name} not found in caller's global symbol table")
+
+    # Initialize and return the class
+    return class_def()
+
+def sql_executor(sql_query_with_placeholders:str, parameters_in_pydantic_class: Any, connection: psycopg.Connection):
+    # Convert parameters from Pydantic class to dictionary
+    parameters = parameters_in_pydantic_class.dict()
+    for k,v in parameters.items():
+        sql_query_with_placeholders = sql_query_with_placeholders.replace(f":{k}", f"%s")
+
+    print(f"SQL Query: {sql_query_with_placeholders}")
+    
+    with connection.cursor() as cursor:
+        cursor.execute(sql_query_with_placeholders, parameters)
+        # Try to fetch rows, for SELECT statements
+        try:
+            rows = cursor.fetchall()
+        # Insert, Update, Delete statements don't return rows
+        except:
+            rows = []
+    
+    return rows
 
 def pascal_case(name: str) -> str:
     # Example input: "select_federal_rows"

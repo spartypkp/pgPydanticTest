@@ -263,8 +263,7 @@ def apply_codemod_to_file(filename: str):
 
     print(f"\n\nTree:\n\n{tree}")
     print(type(tree))
-
-    exit(1)
+    
 
     # Apply the codemod
     transformer = SQLTransformer(filename)
@@ -275,6 +274,10 @@ def apply_codemod_to_file(filename: str):
     new_filename = filename.rsplit(".", 1)[0] + "_processed.py"
     with open(new_filename, "w") as f2:
         f2.write(modified_tree.code)
+
+    
+
+
 
 # ================================= UTILITY FUNCTIONS ========================================
 
@@ -295,7 +298,7 @@ def db_connect(row_factory=None):
         password = db_params['db']["password"]
         user = db_params['db']["user"]
         conn = psycopg.connect(dbname=dbname,host=host,user=user,password=password,port="5432",client_encoding="utf8")
-       
+        
 		
         if row_factory is not None:
             conn.row_factory = row_factory
@@ -322,33 +325,22 @@ def sql(query: str, func: T) -> T:
     return Callable[..., T]
 
 
-def sql_executor(query: str, func: T) -> T:
-    # Get the return type of func
-    return_type_class_name = func.__annotations__['return']
-    print(f"Return type class name: {return_type_class_name}")
-    print(type(return_type_class_name))
-    origin = get_origin(return_type_class_name)
-    args = get_args(return_type_class_name)
+def sql_executor(sql_query_with_placeholders:str, parameters_in_pydantic_class: Any, connection: psycopg.Connection):
+    # Convert parameters from Pydantic class to dictionary
+    parameters = parameters_in_pydantic_class.dict()
+    for k,v in parameters.items():
+        sql_query_with_placeholders = sql_query_with_placeholders.replace(f":{k}", f"%s")
 
-    # Check if the origin is typing.Optional
+    print(f"SQL Query: {sql_query_with_placeholders}")
     
-    arg = args[0]
-    print(f"Agrs: {args}")
-    pydantic_class = arg
-    print(f"Pydantic return model: {pydantic_class}")
-
-    if pydantic_class is None:
-        raise ValueError(f"Return type class {return_type_class_name} not found")
-    
-    conn = db_connect(row_factory=class_row(pydantic_class))
-    with conn.cursor() as cursor:
-        cursor.execute(query)
+    with connection.cursor() as cursor:
+        cursor.execute(sql_query_with_placeholders, parameters)
         # Try to fetch rows, for SELECT statements
         try:
             rows = cursor.fetchall()
         # Insert, Update, Delete statements don't return rows
         except:
-            rows = None
+            rows = []
     
     return rows
 
