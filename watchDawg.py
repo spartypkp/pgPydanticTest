@@ -298,7 +298,7 @@ def db_connect(row_factory=None):
         password = db_params['db']["password"]
         user = db_params['db']["user"]
         conn = psycopg.connect(dbname=dbname,host=host,user=user,password=password,port="5432",client_encoding="utf8")
-        
+        print(f"Dbname: {dbname}, Host: {host}, User: {user}, Password: {password}")
 		
         if row_factory is not None:
             conn.row_factory = row_factory
@@ -325,24 +325,6 @@ def sql(query: str, func: T) -> T:
     return Callable[..., T]
 
 
-def sql_executor(sql_query_with_placeholders:str, parameters_in_pydantic_class: Any, connection: psycopg.Connection):
-    # Convert parameters from Pydantic class to dictionary
-    parameters = parameters_in_pydantic_class.dict()
-    for k,v in parameters.items():
-        sql_query_with_placeholders = sql_query_with_placeholders.replace(f":{k}", f"%s")
-
-    print(f"SQL Query: {sql_query_with_placeholders}")
-    
-    with connection.cursor() as cursor:
-        cursor.execute(sql_query_with_placeholders, parameters)
-        # Try to fetch rows, for SELECT statements
-        try:
-            rows = cursor.fetchall()
-        # Insert, Update, Delete statements don't return rows
-        except:
-            rows = []
-    
-    return rows
 
 def create_logger(verbose=False):
     global LOGGER

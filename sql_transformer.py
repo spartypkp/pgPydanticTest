@@ -11,6 +11,7 @@ import subprocess
 import json
 # apply_codemod.py
 import sys
+import re
 import subprocess
 import libcst as cst
 from libcst.codemod import CodemodContext
@@ -148,6 +149,10 @@ class SQLTransformer(cst.CSTTransformer):
             
             sql_string = updated_node.args[0].value.value.lstrip('"').rstrip('"')
             LOGGER.debug(f"Found SQL string: {sql_string}")
+            if sql_string[-1] != ";":
+                LOGGER.critical(f"SQL string does not end with a semicolon: {sql_string}")
+                sql_string += ";"
+                LOGGER.critical(f"Added semicolon to end of SQL string: {sql_string}")
 
             # Inside the Call Node, this gets the parent Assign node
             if self.node_stack:
@@ -163,14 +168,46 @@ class SQLTransformer(cst.CSTTransformer):
             LOGGER.debug(f"Assign name raw: {assign_name_raw}")
             assign_name = pascal_case(assign_name_raw)
             LOGGER.debug(f"Pascal Assign name: {assign_name}")
-            sql_hash = hash(sql_string)
+            
 
             # sql_key:
             # federal_rows,test.py
             # sql_class = sql("SELECT * FROM table;")
             # result = sql_class.invoke()
             files_used_in = []
+            
+            # Find all occurences of "0:Anything" in the sql_string". Use regex
+            parameter_expansions = []
+            parameter_object_expansions = []
 
+            # If you use more than 100 parameter expansions I hope your shit breaks
+            for i in range(0, 100):
+                obj = "..."
+                param = None
+                obj_pattern = f"{i}:("
+                if obj_pattern in sql_string:
+                    obj_index = sql_string.find(obj_pattern)
+                    closing_index = sql_string.find(")", obj_index)
+                    obj = sql_string[obj_index + len(str(i)):closing_index]
+                    sql_string = sql_string.replace(obj_pattern, "(")
+                
+                param_pattern = f"{i}:"
+                if param_pattern in sql_string:
+                    param_index = sql_string.find(param_pattern)
+                    # Find the index of the next punctuation/space/newline
+                    match = re.search(r'\s|\n|[.,;!?]', sql_string[param_index:])
+                    if match:
+                        closing_index = param_index + match.start()
+                    else:
+                        closing_index = len(sql_string)
+                    param = sql_string[param_index + len(str(i)):closing_index]
+                    sql_string = sql_string.replace(param_pattern, ":")
+               
+                parameter_expansions.append((param, obj))
+        
+
+
+            sql_hash = hash(sql_string)
             sql_key = assign_name
             LOGGER.debug(f"SQL key: {sql_key}")
             invocation_metadata = {
@@ -178,7 +215,8 @@ class SQLTransformer(cst.CSTTransformer):
                 "sql_string": sql_string,
                 "native_sql": "",
                 "file_defined_in": self.filename,
-                "files_used_in": files_used_in
+                "files_used_in": files_used_in,
+                "parameter_expansions": parameter_expansions,
             }
             cache = None
             # Check if the sql_key is in the cache.json file
@@ -213,7 +251,11 @@ class SQLTransformer(cst.CSTTransformer):
                     LOGGER.debug(f"Case 4: Completely new invocation")
                     cache[sql_key] = invocation_metadata
 
-            native_sql = f"/* @name {sql_key} */\n{sql_string}"
+            native_sql = f"/* @name {sql_key} */\n"
+            for tup in parameter_expansions:
+                native_sql += f"/* @param {tup[0]} -> ({tup[1]}) */\n"
+            native_sql += sql_string
+            
             
             cache[sql_key]["native_sql"] = native_sql
             
@@ -257,6 +299,7 @@ class SQLTransformer(cst.CSTTransformer):
             write_string = ""
             for k,v in self.local_cache.items():
                 write_string += v["native_sql"] + "\n\n"
+                
             LOGGER.debug(f"Writing to _temp.sql file: {write_string}")
             f.write(write_string)
         f.close()
@@ -281,6 +324,7 @@ class SQLTransformer(cst.CSTTransformer):
         updated_model_classes_raw.pop()
         updated_model_classes: List[cst.ClassDef] = []
         for i, model in enumerate(updated_model_classes_raw):
+            LOGGER.debug(f"Model {i}: {model}")
             as_module = cst.parse_module(model)
             as_class = as_module.body[0]
             updated_model_classes.append(as_class)
@@ -484,21 +528,32 @@ def sql(query: str) -> T:
 
 def sql_executor(sql_query_with_placeholders:str, parameters_in_pydantic_class: Any, connection: psycopg.Connection):
     # Convert parameters from Pydantic class to dictionary
-    parameters = parameters_in_pydantic_class.dict()
-    for k,v in parameters.items():
-        sql_query_with_placeholders = sql_query_with_placeholders.replace(f":{k}", f"%s")
+    if parameters_in_pydantic_class is None:
+        parameters = {}
+    else:
+        parameters = parameters_in_pydantic_class.dict()
 
+    for k,v in parameters.items():
+        sql_query_with_placeholders = sql_query_with_placeholders.replace(f":{k}", f"%({k})s")
+
+    if sql_query_with_placeholders[-1] != ";":
+        sql_query_with_placeholders += ";"
     print(f"SQL Query: {sql_query_with_placeholders}")
-    
+    print(f"Parameters: {parameters}")
     with connection.cursor() as cursor:
-        cursor.execute(sql_query_with_placeholders, parameters)
+        if parameters:
+            cursor.execute(sql_query_with_placeholders, parameters)
+        else:
+            
+            cursor.execute(sql_query_with_placeholders)
+            print(f"Executed query, no parameters.")
         # Try to fetch rows, for SELECT statements
         try:
             rows = cursor.fetchall()
         # Insert, Update, Delete statements don't return rows
         except:
             rows = []
-    
+            connection.commit()
     return rows
 
 def pascal_case(name: str) -> str:
