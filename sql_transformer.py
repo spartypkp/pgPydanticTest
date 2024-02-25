@@ -210,44 +210,46 @@ class SQLTransformer(cst.CSTTransformer):
             LOGGER.debug(f"Original SQL string: {sql_string}")
 
             if len(updated_node.args) == 2:
-                expansions = updated_node.args[1]
+                expansions = updated_node.args[1].value.args[0].value.elements
                 with open("TESTOUTPUT.txt", "w") as f:
                     f.write(str(expansions))
                 
                 LOGGER.debug(f"Expansions: {expansions}")
             
-                for expansion in expansions.elements:
-                    print(expansion)
-                    exit(1)
+                for expansion in expansions:
+                    LOGGER.debug(expansion.value.func.value)
+                    LOGGER.debug(f"Type of expansion: {type(expansion.value.func.value)}")
                     
                     
-                    if isinstance(expansion, ExpansionScalarList):  
+                    LOGGER.debug(f"Is scalar list: {expansion.value.func.value == 'ExpansionScalarList'}")
+                    if expansion.value.func.value == "ExpansionScalarList":
                         sql_comment = f"@param {expansion.param_name} -> (...)\n"
                         parameter_expansions.append(sql_comment)
                         continue
 
-                    
+                    LOGGER.debug(expansion.value.args[1].value.elements)
                     
                     obj_string = "("
-                    for obj_name in expansions.object_vars:
-                        obj_string += f"{obj_name}, "
+                    for obj_name in expansions.value.args[1].value.elements:
+                        obj = obj_name.value.value.lstrip('"').rstrip('"')
+                        obj_string += f"{obj}, "
                     obj_string = obj_string[:-2] + ")"
                         
                             
-                    if isinstance(expansion, ExpansionObject):
+                    if expansion.value.func.value ==  "ExpansionObject":
 
                         sql_comment = f"@param {expansion.param_name} -> {obj_string}\n"
                         parameter_expansions.append(sql_comment)
                         continue
 
-                    if isinstance(expansion, ExpansionObjectList):
+                    if expansion.value.func.value ==  "ExpansionObjectList":
                         sql_comment = f"@param {expansion.param_name} -> ({obj_string}...)\n"
                         parameter_expansions.append(sql_comment)
                         continue
                 
 
                 # Regular paramter expansion, no need to modify the sql_string
-            LOGGER.debug(f"New SQL string: {sql_string}")
+            
             LOGGER.debug(f"Parameter expansions: {parameter_expansions}")
         
 
@@ -466,10 +468,10 @@ def check_for_valid_sql_invocation(node: cst.Call) -> bool:
     if not m.matches(func_call, m.Name("sql")) or not m.matches(args[0].value, m.SimpleString()):
         return False
     # Ensure that the second argument is of type List[Expansion]
-    LOGGER.debug(f"Second argument: {args[1].value}")
-    LOGGER.debug(f"The type of the second argument: {type(args[1].value)}")
-    LOGGER.debug(m.matches(args[1].value, m.Name("ExpansionList")))
-    if len(args) == 2 and not m.matches(args[1].value, m.Name("ExpansionList")):
+    LOGGER.debug(f"Second argument: {args[1].value.func}")
+    LOGGER.debug(f"The type of the second argument: {type(args[1].value.func)}")
+    LOGGER.debug(m.matches(args[1].value.func, m.Name("ExpansionList")))
+    if len(args) == 2 and not m.matches(args[1].value.func, m.Name("ExpansionList")):
         return False
     
     return True
