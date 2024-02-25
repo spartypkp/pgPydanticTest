@@ -31,13 +31,36 @@ DIR = os.path.dirname(os.path.realpath(__file__))
 parent = os.path.dirname(DIR)
 sys.path.append(parent)
 
-class Expansion(BaseModel):
+
+# Making impossible states impossible: Talk recommended by Sean
+class ExpansionScalarList(BaseModel):
+    """
+    param_name: The name of the parameter in the SQL string, which denotes the list of scalars being inserted.
+    Use this class when a dynamically inserted variable should be a list of scalars."""
     param_name: str
-    is_list_of_scalars: bool = False
+
+class ExpansionObject(BaseModel):
+    """
+    param_name: The name of the parameter in the SQL string, which denotes the object being inserted.
+    object_vars: The variables that are being inserted into the SQL string in the form of a single object.
+    Use this class when dynamically inserted variables are being represented by a single object in the SQL string.
+    """
+    param_name: str
     object_vars: List[str]
-    is_list_of_objects: bool = False
+
+class ExpansionObjectList(BaseModel):
+    """
+    param_name: The name of the parameter in the SQL string, which denotes the object being inserted.
+    object_vars: The variables that are being inserted into the SQL string in the form of a single object.
+    Use this class when you want to dynamically insert a list of objects into the SQL string.
+    """
+    param_name: str
+    object_vars: List[str]
     
-    
+
+class ExpansionList(BaseModel):
+    expansions: List[Union[ExpansionScalarList, ExpansionObject, ExpansionObjectList]]
+
 
 LOGGER = None
 
@@ -180,52 +203,46 @@ class SQLTransformer(cst.CSTTransformer):
             LOGGER.debug(f"Pascal Assign name: {assign_name}")
 
             # Get the second argument, if it exists
-            expansions = []
+            
+            parameter_expansions = []
+            files_used_in = []        
+            LOGGER.debug(f"Original SQL string: {sql_string}")
+
             if len(updated_node.args) == 2:
-                expansions = updated_node.args[1].value.elements
+                expansions = updated_node.args[1].value
+                with open("TESTOUTPUT.txt", "w") as f:
+                    f.write(str(expansions))
+                
                 LOGGER.debug(f"Expansions: {expansions}")
             
-            
+                for expansion in expansions.elements:
+                    print(expansion)
+                    exit(1)
+                    
+                    
+                    if isinstance(expansion, ExpansionScalarList):  
+                        sql_comment = f"@param {expansion.param_name} -> (...)\n"
+                        parameter_expansions.append(sql_comment)
+                        continue
 
-            files_used_in = []
-            
-
-            # # Regular insertion
-            # insert_stupid_person: InsertStupidPerson = sql("""INSERT INTO stupid_test_table (name, age, email) VALUES ('me', '24', 'broke@pleasehireme.com');""")
-            # # Dynamic insertion
-            # insert_normal_person: InsertSmartPerson = sql("INSERT INTO stupid_test_table (name, age, email) VALUES (:name, :age, :email);")
-            # # Dyanmic object insertion - single object
-            # insert_smart_person: InsertSmartPerson = sql("INSERT INTO stupid_test_table (name, age, email):account VALUES :account;")
-
-            # # Dyanmic object insertion - list of objects
-            # insert_genius_person: InsertSmartPerson = sql("INSERT INTO stupid_test_table (name, age, email):accounts[] VALUES :accounts;")
-
-            # # Passing an array of scalars
-            # select_smart_and_genius = sql("SELECT * FROM stupid_test_table WHERE name in :names[];")
-    
-            LOGGER.debug(f"Original SQL string: {sql_string}")
-            parameter_expansions = []
-            for expansion in expansions:
-                
-                if expansion.is_list_of_scalars:  
-                    sql_comment = f"@param {expansion.param_name} -> (...)\n"
-                    parameter_expansions.append(sql_comment)
-                    continue
-
-                
-                if expansions.object_vars:
+                    
+                    
                     obj_string = "("
                     for obj_name in expansions.object_vars:
                         obj_string += f"{obj_name}, "
                     obj_string = obj_string[:-2] + ")"
-                    
                         
-                    if expansions.is_list_of_objects:
-                        obj_string = f"({obj_string}...)"
+                            
+                    if isinstance(expansion, ExpansionObject):
 
-                    sql_comment = f"@param {expansion.param_name} -> {obj_string}\n"
-                    parameter_expansions.append(sql_comment)
-                    continue
+                        sql_comment = f"@param {expansion.param_name} -> {obj_string}\n"
+                        parameter_expansions.append(sql_comment)
+                        continue
+
+                    if isinstance(expansion, ExpansionObjectList):
+                        sql_comment = f"@param {expansion.param_name} -> ({obj_string}...)\n"
+                        parameter_expansions.append(sql_comment)
+                        continue
                 
 
                 # Regular paramter expansion, no need to modify the sql_string
@@ -530,7 +547,7 @@ def create_logger(verbose=False):
 import inspect
 
 T = TypeVar('T')
-def sql(query: str, expansions: Optional[List[Expansion]]) -> T:
+def sql(query: str, expansionList: Optional[ExpansionList]) -> T:
     # Get the filename of the file that called this function
     with open("cache.json", "r") as f:
         cache = json.load(f)
