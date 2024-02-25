@@ -177,7 +177,8 @@ class SQLTransformer(cst.CSTTransformer):
     
     def leave_Call(self, original_node: cst.Call, updated_node: cst.Call) -> cst.Call:
         
-        
+        LOGGER.debug(f"Leaving Call: {updated_node.func.value}")
+        LOGGER.debug(f"Is valid SQL invocation: {check_for_valid_sql_invocation(original_node)}")
         if check_for_valid_sql_invocation(original_node):
             
             sql_string = updated_node.args[0].value.value.lstrip('"').rstrip('"')
@@ -209,7 +210,7 @@ class SQLTransformer(cst.CSTTransformer):
             LOGGER.debug(f"Original SQL string: {sql_string}")
 
             if len(updated_node.args) == 2:
-                expansions = updated_node.args[1].value
+                expansions = updated_node.args[1]
                 with open("TESTOUTPUT.txt", "w") as f:
                     f.write(str(expansions))
                 
@@ -458,13 +459,17 @@ def check_for_valid_sql_invocation(node: cst.Call) -> bool:
     args = node.args
 
     # Ensure the Call node has a function and arguments
-    if len(args) < 1 or len(args) > 2:
+    LOGGER.debug(f"Function call: {func_call}")
+    if len(args) != 1 and len(args) != 2:
         return False
     # Ensure that the function being called is `sql` and that the first argument is a string literal
     if not m.matches(func_call, m.Name("sql")) or not m.matches(args[0].value, m.SimpleString()):
         return False
     # Ensure that the second argument is of type List[Expansion]
-    if len(args) == 2 and not m.matches(args[1].value, m.List()):
+    LOGGER.debug(f"Second argument: {args[1].value}")
+    LOGGER.debug(f"The type of the second argument: {type(args[1].value)}")
+    LOGGER.debug(m.matches(args[1].value, m.Name("ExpansionList")))
+    if len(args) == 2 and not m.matches(args[1].value, m.Name("ExpansionList")):
         return False
     
     return True
