@@ -1,4 +1,5 @@
 
+from test_models import InsertSmartPerson
 
 from watchDawg import db_connect
 from sql_transformer import sql, ExpansionList, ExpansionScalarList, ExpansionObject, ExpansionObjectList
@@ -21,7 +22,7 @@ def main():
     # print(f"\n\n======== Test SQL Select ========")
     # print(f"Type of result: {type(select_result)}")
     # print(f"Length of result: {len(select_result)}")
-    # print(f"Type of first element in result: {type(select_result[0])}")
+    # print(f"Type of first element in result: {type(select_result[0])}") 
     # print(f"Last element in result: {select_result[-1]}")
 
     # # Test SQL Create Table, currently broekn
@@ -42,8 +43,8 @@ def main():
     # insert_stupid_person: InsertStupidPerson = sql("""INSERT INTO stupid_test_table (name, age, email) VALUES ('me', '24', 'broke@pleasehireme.com');""")
     # # Dynamic insertion
     # insert_normal_person: InsertNormalPerson = sql("INSERT INTO stupid_test_table (name, age, email) VALUES (:name, :age, :email);")
-    # Dyanmic object insertion - single object    
-    insert_smart_person = sql("INSERT INTO stupid_test_table (name, age, email) VALUES :account;",
+    # Dyanmic object insertion - single object        
+    insert_smart_person: InsertSmartPerson = sql("INSERT INTO stupid_test_table (name, age, email) VALUES :account;",
                               ExpansionList(expansions=[
                                 ExpansionObject(param_name="account", object_vars=["name", "age", "email"])
                               ]) 
