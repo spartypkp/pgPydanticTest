@@ -19,15 +19,25 @@ from libcst.metadata import ParentNodeProvider
 import psycopg
 from psycopg.types.json import Jsonb
 from psycopg.rows import class_row, dict_row
-from typing import List, Any, Optional, TypeVar, Callable, Union, get_args, get_origin
+from typing import List, Any, Optional, TypeVar, Callable, Union, get_args, get_origin, Dict
 import pydantic
+from pydantic import BaseModel
 import logging
 import inspect
+
 import os
 from model_transformer import ModelTransformer, add_module
 DIR = os.path.dirname(os.path.realpath(__file__))
 parent = os.path.dirname(DIR)
 sys.path.append(parent)
+
+class Expansion(BaseModel):
+    param_name: str
+    is_list_of_scalars: bool = False
+    object_vars: List[str]
+    is_list_of_objects: bool = False
+    
+    
 
 LOGGER = None
 
@@ -168,44 +178,60 @@ class SQLTransformer(cst.CSTTransformer):
             LOGGER.debug(f"Assign name raw: {assign_name_raw}")
             assign_name = pascal_case(assign_name_raw)
             LOGGER.debug(f"Pascal Assign name: {assign_name}")
+
+            # Get the second argument, if it exists
+            expansions = []
+            if len(updated_node.args) == 2:
+                expansions = updated_node.args[1].value.elements
+                LOGGER.debug(f"Expansions: {expansions}")
+            
             
 
-            # sql_key:
-            # federal_rows,test.py
-            # sql_class = sql("SELECT * FROM table;")
-            # result = sql_class.invoke()
             files_used_in = []
             
-            # Find all occurences of "0:Anything" in the sql_string". Use regex
+
+            # # Regular insertion
+            # insert_stupid_person: InsertStupidPerson = sql("""INSERT INTO stupid_test_table (name, age, email) VALUES ('me', '24', 'broke@pleasehireme.com');""")
+            # # Dynamic insertion
+            # insert_normal_person: InsertSmartPerson = sql("INSERT INTO stupid_test_table (name, age, email) VALUES (:name, :age, :email);")
+            # # Dyanmic object insertion - single object
+            # insert_smart_person: InsertSmartPerson = sql("INSERT INTO stupid_test_table (name, age, email):account VALUES :account;")
+
+            # # Dyanmic object insertion - list of objects
+            # insert_genius_person: InsertSmartPerson = sql("INSERT INTO stupid_test_table (name, age, email):accounts[] VALUES :accounts;")
+
+            # # Passing an array of scalars
+            # select_smart_and_genius = sql("SELECT * FROM stupid_test_table WHERE name in :names[];")
+    
+            LOGGER.debug(f"Original SQL string: {sql_string}")
             parameter_expansions = []
-            parameter_object_expansions = []
-
-            # If you use more than 100 parameter expansions I hope your shit breaks
-            for i in range(0, 100):
-                obj = "..."
-                param = None
-                obj_pattern = f"{i}:("
-                if obj_pattern in sql_string:
-                    obj_index = sql_string.find(obj_pattern)
-                    closing_index = sql_string.find(")", obj_index)
-                    obj = sql_string[obj_index + len(str(i)):closing_index]
-                    sql_string = sql_string.replace(obj_pattern, "(")
+            for expansion in expansions:
                 
-                param_pattern = f"{i}:"
-                if param_pattern in sql_string:
-                    param_index = sql_string.find(param_pattern)
-                    # Find the index of the next punctuation/space/newline
-                    match = re.search(r'\s|\n|[.,;!?]', sql_string[param_index:])
-                    if match:
-                        closing_index = param_index + match.start()
-                    else:
-                        closing_index = len(sql_string)
-                    param = sql_string[param_index + len(str(i)):closing_index]
-                    sql_string = sql_string.replace(param_pattern, ":")
-               
-                parameter_expansions.append((param, obj))
-        
+                if expansion.is_list_of_scalars:  
+                    sql_comment = f"@param {expansion.param_name} -> (...)\n"
+                    parameter_expansions.append(sql_comment)
+                    continue
 
+                
+                if expansions.object_vars:
+                    obj_string = "("
+                    for obj_name in expansions.object_vars:
+                        obj_string += f"{obj_name}, "
+                    obj_string = obj_string[:-2] + ")"
+                    
+                        
+                    if expansions.is_list_of_objects:
+                        obj_string = f"({obj_string}...)"
+
+                    sql_comment = f"@param {expansion.param_name} -> {obj_string}\n"
+                    parameter_expansions.append(sql_comment)
+                    continue
+                
+
+                # Regular paramter expansion, no need to modify the sql_string
+            LOGGER.debug(f"New SQL string: {sql_string}")
+            LOGGER.debug(f"Parameter expansions: {parameter_expansions}")
+        
 
             sql_hash = hash(sql_string)
             sql_key = assign_name
@@ -251,9 +277,10 @@ class SQLTransformer(cst.CSTTransformer):
                     LOGGER.debug(f"Case 4: Completely new invocation")
                     cache[sql_key] = invocation_metadata
 
-            native_sql = f"/* @name {sql_key} */\n"
-            for tup in parameter_expansions:
-                native_sql += f"/* @param {tup[0]} -> ({tup[1]}) */\n"
+            native_sql = f"/* @name {sql_key} \n"
+            for expansion in parameter_expansions:
+                native_sql += expansion
+            native_sql += "*/\n"
             native_sql += sql_string
             
             
@@ -414,11 +441,15 @@ def check_for_valid_sql_invocation(node: cst.Call) -> bool:
     args = node.args
 
     # Ensure the Call node has a function and arguments
-    if len(args) != 1:
+    if len(args) < 1 or len(args) > 2:
         return False
     # Ensure that the function being called is `sql` and that the first argument is a string literal
     if not m.matches(func_call, m.Name("sql")) or not m.matches(args[0].value, m.SimpleString()):
         return False
+    # Ensure that the second argument is of type List[Expansion]
+    if len(args) == 2 and not m.matches(args[1].value, m.List()):
+        return False
+    
     return True
 
 
@@ -499,7 +530,7 @@ def create_logger(verbose=False):
 import inspect
 
 T = TypeVar('T')
-def sql(query: str) -> T:
+def sql(query: str, expansions: Optional[List[Expansion]]) -> T:
     # Get the filename of the file that called this function
     with open("cache.json", "r") as f:
         cache = json.load(f)
