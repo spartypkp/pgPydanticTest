@@ -21,7 +21,7 @@ from psycopg.types.json import Jsonb
 from psycopg.rows import class_row, dict_row
 from typing import List, Any, Optional, TypeVar, Callable, Union, get_args, get_origin, Dict
 import pydantic
-from pydantic import BaseModel
+from pydantic import BaseModel, computed_field
 import logging
 import inspect
 
@@ -38,6 +38,24 @@ class ExpansionScalarList(BaseModel):
     param_name: The name of the parameter in the SQL string, which denotes the list of scalars being inserted.
     Use this class when a dynamically inserted variable should be a list of scalars."""
     param_name: str
+
+class ExpansionModel(BaseModel):
+    """
+    param_name: The name of the parameter in the SQL string, which denotes the object being inserted.
+    pydantic_type: The Pydantic model that the object should be an instance of.
+    source_file: The file that the Pydantic model is defined in.
+    Use this class when dynamically inserted variables are being represented by a single object in the SQL string.
+    """
+    param_name: str
+    pydantic_type: Any
+    source_file: str
+
+    @computed_field
+    @property
+    def object_vars(self) -> List[str]:
+        # Return the names of the fields in the Pydantic model
+        return self.pydantic_type.__fields__.keys()
+    
 
 class ExpansionObject(BaseModel):
     """
@@ -219,31 +237,54 @@ class SQLTransformer(cst.CSTTransformer):
                 for expansion in expansions:
                     LOGGER.debug(expansion.value.func.value)
                     LOGGER.debug(f"Type of expansion: {type(expansion.value.func.value)}")
-                    
+                    param_name = expansion.value.args[0].value.value.lstrip('"').rstrip('"')
+                    LOGGER.debug(f"Param name: {param_name}")
                     
                     LOGGER.debug(f"Is scalar list: {expansion.value.func.value == 'ExpansionScalarList'}")
                     if expansion.value.func.value == "ExpansionScalarList":
-                        sql_comment = f"@param {expansion.param_name} -> (...)\n"
+                        sql_comment = f"@param {param_name} -> (...)\n"
                         parameter_expansions.append(sql_comment)
                         continue
-
-                    LOGGER.debug(expansion.value.args[1].value.elements)
                     
+                    if expansion.value.func.value == "ExpansionModel" or expansion.value.func.value == "ExpansionModelList":
+                        source_file = expansion.value.args[2].value.value.lstrip('"').rstrip('"')
+                        custom_model_imports = f"from {source_file} import {pascal_case(param_name)}"
+                        object_vars_elements = expansion.value.args[3].value.elements
+                        obj_string = "("
+                        for obj_name in object_vars_elements:
+                            obj = obj_name.value.value.lstrip('"').rstrip('"')
+                            obj_string += f"{obj}, "
+                        obj_string = obj_string[:-2] + ")"
+
+                        if expansion.value.func.value == "ExpansionModel":
+                            
+                            sql_comment = f"@param {param_name} -> {obj_string}\n"
+                            parameter_expansions.append(sql_comment)
+                            continue
+                        else:
+                            sql_comment = f"@param {param_name} -> ({obj_string}...)\n"
+                            
+                            parameter_expansions.append(sql_comment)
+                            continue
+                    
+                    object_vars_elements = expansion.value.args[1].value.elements
+                    LOGGER.debug(type(object_vars_elements))
+                    object_vars_elements = list(object_vars_elements)
+                    LOGGER.debug(f"Object vars: {object_vars_elements}")
                     obj_string = "("
-                    for obj_name in expansions.value.args[1].value.elements:
+                    for obj_name in object_vars_elements:
                         obj = obj_name.value.value.lstrip('"').rstrip('"')
                         obj_string += f"{obj}, "
                     obj_string = obj_string[:-2] + ")"
                         
                             
                     if expansion.value.func.value ==  "ExpansionObject":
-
-                        sql_comment = f"@param {expansion.param_name} -> {obj_string}\n"
+                        sql_comment = f"@param {param_name} -> {obj_string}\n"
                         parameter_expansions.append(sql_comment)
                         continue
 
                     if expansion.value.func.value ==  "ExpansionObjectList":
-                        sql_comment = f"@param {expansion.param_name} -> ({obj_string}...)\n"
+                        sql_comment = f"@param {param_name} -> ({obj_string}...)\n"
                         parameter_expansions.append(sql_comment)
                         continue
                 
@@ -338,6 +379,7 @@ class SQLTransformer(cst.CSTTransformer):
     
     def leave_Module(self, original_node: cst.Module, updated_node: cst.Module) -> cst.Module:
         
+        custom_model_imports = []
         converted_filename = self.filename_without_extension + "_temp.sql"
         if len(self.local_cache.keys()) == 0:
             LOGGER.info(f"No new or updated SQL invocations found in file.")
@@ -346,6 +388,7 @@ class SQLTransformer(cst.CSTTransformer):
             write_string = ""
             for k,v in self.local_cache.items():
                 write_string += v["native_sql"] + "\n\n"
+                custom_model_imports.append(v["custom_model_imports"])
                 
             LOGGER.debug(f"Writing to _temp.sql file: {write_string}")
             f.write(write_string)
