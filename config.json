@@ -11,8 +11,8 @@
   "camelCaseColumnNames": false,
   "db": {
     "host": "localhost",
-    "user": "s",
-    "dbName": "s",
+    "user": "",
+    "dbName": "",
     "password": ""
   },
   

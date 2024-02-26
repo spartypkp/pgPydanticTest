@@ -58,27 +58,28 @@ class ExpansionModel(BaseModel):
         return self.pydantic_type.__fields__.keys()
     
 
-class ExpansionObject(BaseModel):
-    """
-    param_name: The name of the parameter in the SQL string, which denotes the object being inserted.
-    object_vars: The variables that are being inserted into the SQL string in the form of a single object.
-    Use this class when dynamically inserted variables are being represented by a single object in the SQL string.
-    """
-    param_name: str
-    object_vars: List[str]
 
-class ExpansionObjectList(BaseModel):
+class ExpansionModelList(BaseModel):
     """
     param_name: The name of the parameter in the SQL string, which denotes the object being inserted.
-    object_vars: The variables that are being inserted into the SQL string in the form of a single object.
-    Use this class when you want to dynamically insert a list of objects into the SQL string.
+    pydantic_type: The Pydantic model that the object should be an instance of.
+    source_file: The file that the Pydantic model is defined in.
+    Use this class when dynamically inserted variables are being represented by a single object in the SQL string, however you want to insert multiple.
     """
     param_name: str
-    object_vars: List[str]
+    pydantic_type: Any
+    source_file: str
+
+
+    @computed_field
+    @property
+    def object_vars(self) -> List[str]:
+        # Return the names of the fields in the Pydantic model
+        return self.pydantic_type.__fields__.keys()
     
 
 class ExpansionList(BaseModel):
-    expansions: List[Union[ExpansionScalarList, ExpansionObject, ExpansionObjectList]]
+    expansions: List[Union[ExpansionScalarList, ExpansionModel, ExpansionModelList]]
 
 
 LOGGER = None
@@ -189,15 +190,15 @@ class SQLTransformer(cst.CSTTransformer):
 
     def visit_AnnAssign(self, node: cst.AnnAssign) -> None:
         self.handle_assignment(node)
-        LOGGER.debug(f"Visiting AnnAssign: {node.target.value}")
-        LOGGER.debug(f"Current Annotation: {node.annotation.annotation.value}")
+        # LOGGER.debug(f"Visiting AnnAssign: {node.target.value}")
+        # LOGGER.debug(f"Current Annotation: {node.annotation.annotation.value}")
 
         
     
     def leave_Call(self, original_node: cst.Call, updated_node: cst.Call) -> cst.Call:
         
-        LOGGER.debug(f"Leaving Call: {updated_node.func.value}")
-        LOGGER.debug(f"Is valid SQL invocation: {check_for_valid_sql_invocation(original_node)}")
+        # LOGGER.debug(f"Leaving Call: {updated_node.func.value}")
+        # LOGGER.debug(f"Is valid SQL invocation: {check_for_valid_sql_invocation(original_node)}")
         if check_for_valid_sql_invocation(original_node):
             
             sql_string = updated_node.args[0].value.value.lstrip('"').rstrip('"')
@@ -218,7 +219,7 @@ class SQLTransformer(cst.CSTTransformer):
                 assign_name_raw = last_assign.target.value.lstrip('"').rstrip('"')
             else:
                 assign_name_raw = last_assign.targets[0].target.value.lstrip('"').rstrip('"')
-            LOGGER.debug(f"Assign name raw: {assign_name_raw}")
+            # LOGGER.debug(f"Assign name raw: {assign_name_raw}")
             assign_name = pascal_case(assign_name_raw)
             LOGGER.debug(f"Pascal Assign name: {assign_name}")
 
@@ -231,8 +232,8 @@ class SQLTransformer(cst.CSTTransformer):
 
             if len(updated_node.args) == 2:
                 expansions = updated_node.args[1].value.args[0].value.elements
-                with open("TESTOUTPUT.txt", "w") as f:
-                    f.write(str(expansions))
+                # with open("TESTOUTPUT.txt", "w") as f:
+                #     f.write(str(expansions))
                 
                 LOGGER.debug(f"Expansions: {expansions}")
             
@@ -261,8 +262,9 @@ class SQLTransformer(cst.CSTTransformer):
                         # Get the model's fields
                         fields = model.__fields__.keys()
 
-                        custom_model_import = f"from {source_file.replace('.py','')} import {pascal_case(param_name)}"
-                        custom_model_imports.append(custom_model_import)
+                        custom_model_import = f"from {source_file.replace('.py','')} import {pascal_case(param_name)}\n"
+                        if custom_model_import not in custom_model_imports:
+                            custom_model_imports.append(custom_model_import)
                         
                         obj_string = "("
                         for field in fields:
@@ -377,7 +379,7 @@ class SQLTransformer(cst.CSTTransformer):
     
     def leave_Module(self, original_node: cst.Module, updated_node: cst.Module) -> cst.Module:
         
-        custom_model_imports = ""
+        custom_model_imports = set()
         converted_filename = self.filename_without_extension + "_temp.sql"
         if len(self.local_cache.keys()) == 0:
             LOGGER.info(f"No new or updated SQL invocations found in file.")
@@ -386,7 +388,9 @@ class SQLTransformer(cst.CSTTransformer):
             write_string = ""
             for k,v in self.local_cache.items():
                 write_string += v["native_sql"] + "\n\n"
-                custom_model_imports += "\n".join(v["custom_model_imports"])
+                for model_import in v["custom_model_imports"]:
+                    custom_model_imports.add(model_import)
+                
                 
             LOGGER.debug(f"Writing to _temp.sql file: {write_string}")
             f.write(write_string)
@@ -394,7 +398,7 @@ class SQLTransformer(cst.CSTTransformer):
         # Run pgtyped-pydantic to regenerate models
         cfg = 'config.json'
         file_override = converted_filename
-
+        custom_model_imports = "\n".join(list(custom_model_imports))
         
         # Running repository as python subprocess
         command = ['npx', 'pgtyped-pydantic', '-c', cfg, '-f', file_override]
@@ -431,18 +435,21 @@ class SQLTransformer(cst.CSTTransformer):
                 with open(f"{output_filename}.py", "r") as f:
                     source_code = f.read()
                 f.close()
+                source_code = custom_model_imports + "\n" + source_code
                 LOGGER.debug(f"Retrieved source code from {output_filename}.py")
             except:
                 source_code = "from typing import List, Optional, Dict, Any, Union\nimport datetime\nfrom pydantic import BaseModel\nfrom typing_extensions import NewType\nfrom psycopg.rows import class_row\nimport psycopg\nfrom sql_transformer import sql_executor\n\n"
                 for mod in updated_model_classes_raw:
                     source_code += mod
+                if custom_model_imports not in source_code:
+                    source_code = custom_model_imports + "\n" + source_code
                 # File does not exist yet, create it
                 with open(f"{output_filename}.py", "w") as f:
                     f.write(source_code)
                 f.close()
                 skip_model_transformer = True
                 LOGGER.debug(f"Created new file: {output_filename}.py. Wrote updated models to file. SKIPPING MODEL TRANSFORMER")
-            source_code = custom_model_imports + source_code
+            
 
         
         # "monorepo" Mode: Write the updated models to a single file, corresponding to all scanned files
@@ -503,16 +510,14 @@ def check_for_valid_sql_invocation(node: cst.Call) -> bool:
     args = node.args
 
     # Ensure the Call node has a function and arguments
-    LOGGER.debug(f"Function call: {func_call}")
+    
     if len(args) != 1 and len(args) != 2:
         return False
     # Ensure that the function being called is `sql` and that the first argument is a string literal
     if not m.matches(func_call, m.Name("sql")) or not m.matches(args[0].value, m.SimpleString()):
         return False
     # Ensure that the second argument is of type List[Expansion]
-    LOGGER.debug(f"Second argument: {args[1].value.func}")
-    LOGGER.debug(f"The type of the second argument: {type(args[1].value.func)}")
-    LOGGER.debug(m.matches(args[1].value.func, m.Name("ExpansionList")))
+    
     if len(args) == 2 and not m.matches(args[1].value.func, m.Name("ExpansionList")):
         return False
     
@@ -596,7 +601,7 @@ def create_logger(verbose=False):
 import inspect
 
 T = TypeVar('T')
-def sql(query: str, expansionList: Optional[ExpansionList]) -> T:
+def sql(query: str, expansionList: Optional[ExpansionList] = []) -> T:
     # Get the filename of the file that called this function
     with open("cache.json", "r") as f:
         cache = json.load(f)
@@ -622,6 +627,15 @@ def sql(query: str, expansionList: Optional[ExpansionList]) -> T:
 
     # Initialize and return the class
     return class_def()
+
+
+# export interface QueryParameters {
+#   [paramName: string]:
+#     | Scalar
+#     | NestedParameters
+#     | Scalar[]
+#     | NestedParameters[];
+# }
 
 def sql_executor(sql_query_with_placeholders:str, parameters_in_pydantic_class: Any, connection: psycopg.Connection):
     # Convert parameters from Pydantic class to dictionary
@@ -658,5 +672,28 @@ def pascal_case(name: str) -> str:
     # Example output: "SelectFederalRows"
     return "".join(map(str.title, name.split("_")))
     
+
+def db_connect(row_factory=None):
+    """ Connect to the PostgreSQL database server """
+    conn = None
+    try:
+        # connect to the PostgreSQL server
+        # Get these parameters from config.json file
+        with open('config.json') as f:
+            db_params = json.load(f)
+        f.close()
+        dbname = db_params['db']["dbName"]
+        host = db_params['db']["host"]
+        password = db_params['db']["password"]
+        user = db_params['db']["user"]
+        conn = psycopg.connect(dbname=dbname,host=host,user=user,password=password,port="5432",client_encoding="utf8")
+        print(f"Dbname: {dbname}, Host: {host}, User: {user}, Password: {password}")
+		
+        if row_factory is not None:
+            conn.row_factory = row_factory
+        return conn
+    except (Exception, psycopg.DatabaseError) as error:
+        print(error)
+        raise error
 if __name__ == "__main__":
     main()

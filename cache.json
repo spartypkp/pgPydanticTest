@@ -1,1 +1,1 @@
-{"InsertSmartPerson": {"sql_hash": -7175927431483063704, "sql_string": "INSERT INTO stupid_test_table (name, age, email) VALUES :account;", "native_sql": "/* @name InsertSmartPerson \n@param account -> (name, age, email)\n*/\nINSERT INTO stupid_test_table (name, age, email) VALUES :account;", "file_defined_in": "test.py", "files_used_in": [], "parameter_expansions": ["@param account -> (name, age, email)\n"]}}
+{}
