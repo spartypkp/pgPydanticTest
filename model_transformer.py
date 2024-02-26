@@ -22,9 +22,7 @@ class ModelTransformer(cst.CSTTransformer):
 			for i, node in enumerate(self.updated_classes):
 				#print(type(node))
 				#print(node)
-				with open("TESTOUTPUT.txt", "w") as file:
-					file.write(str(node))
-				print(node.name)
+				
 				if node.name.value == original_node.name.value:
 					#print(f"Found a match: {node.name.value} == {original_node.name.value}")
 					removal_index = i
