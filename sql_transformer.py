@@ -24,6 +24,7 @@ import pydantic
 from pydantic import BaseModel, computed_field
 import logging
 import inspect
+import importlib
 
 import os
 from model_transformer import ModelTransformer, add_module
@@ -224,6 +225,7 @@ class SQLTransformer(cst.CSTTransformer):
             # Get the second argument, if it exists
             
             parameter_expansions = []
+            custom_model_imports = []
             files_used_in = []        
             LOGGER.debug(f"Original SQL string: {sql_string}")
 
@@ -247,14 +249,26 @@ class SQLTransformer(cst.CSTTransformer):
                         continue
                     
                     if expansion.value.func.value == "ExpansionModel" or expansion.value.func.value == "ExpansionModelList":
-                        source_file = expansion.value.args[2].value.value.lstrip('"').rstrip('"')
-                        custom_model_imports = f"from {source_file} import {pascal_case(param_name)}"
-                        object_vars_elements = expansion.value.args[3].value.elements
+                        pydantic_model = expansion.value.args[1].value.value
+                        source_file = expansion.value.args[2].value.value.lstrip('"').rstrip('"').replace(".py", "")
+
+                        # Get the pydantic model from the source file. Get the pydantic models .__fields__.keys()
+                        # Dynamically import the Pydantic model
+                        
+                        module = importlib.import_module(source_file)
+                        model = getattr(module, pydantic_model)
+
+                        # Get the model's fields
+                        fields = model.__fields__.keys()
+
+                        custom_model_import = f"from {source_file.replace('.py','')} import {pascal_case(param_name)}"
+                        custom_model_imports.append(custom_model_import)
+                        
                         obj_string = "("
-                        for obj_name in object_vars_elements:
-                            obj = obj_name.value.value.lstrip('"').rstrip('"')
-                            obj_string += f"{obj}, "
+                        for field in fields:
+                            obj_string += f"{field}, "
                         obj_string = obj_string[:-2] + ")"
+                        LOGGER.debug(f"Object string: {obj_string}")
 
                         if expansion.value.func.value == "ExpansionModel":
                             
@@ -267,26 +281,9 @@ class SQLTransformer(cst.CSTTransformer):
                             parameter_expansions.append(sql_comment)
                             continue
                     
-                    object_vars_elements = expansion.value.args[1].value.elements
-                    LOGGER.debug(type(object_vars_elements))
-                    object_vars_elements = list(object_vars_elements)
-                    LOGGER.debug(f"Object vars: {object_vars_elements}")
-                    obj_string = "("
-                    for obj_name in object_vars_elements:
-                        obj = obj_name.value.value.lstrip('"').rstrip('"')
-                        obj_string += f"{obj}, "
-                    obj_string = obj_string[:-2] + ")"
-                        
+                   
                             
-                    if expansion.value.func.value ==  "ExpansionObject":
-                        sql_comment = f"@param {param_name} -> {obj_string}\n"
-                        parameter_expansions.append(sql_comment)
-                        continue
-
-                    if expansion.value.func.value ==  "ExpansionObjectList":
-                        sql_comment = f"@param {param_name} -> ({obj_string}...)\n"
-                        parameter_expansions.append(sql_comment)
-                        continue
+                    
                 
 
                 # Regular paramter expansion, no need to modify the sql_string
@@ -304,6 +301,7 @@ class SQLTransformer(cst.CSTTransformer):
                 "file_defined_in": self.filename,
                 "files_used_in": files_used_in,
                 "parameter_expansions": parameter_expansions,
+                "custom_model_imports": custom_model_imports
             }
             cache = None
             # Check if the sql_key is in the cache.json file
@@ -379,7 +377,7 @@ class SQLTransformer(cst.CSTTransformer):
     
     def leave_Module(self, original_node: cst.Module, updated_node: cst.Module) -> cst.Module:
         
-        custom_model_imports = []
+        custom_model_imports = ""
         converted_filename = self.filename_without_extension + "_temp.sql"
         if len(self.local_cache.keys()) == 0:
             LOGGER.info(f"No new or updated SQL invocations found in file.")
@@ -388,7 +386,7 @@ class SQLTransformer(cst.CSTTransformer):
             write_string = ""
             for k,v in self.local_cache.items():
                 write_string += v["native_sql"] + "\n\n"
-                custom_model_imports.append(v["custom_model_imports"])
+                custom_model_imports += "\n".join(v["custom_model_imports"])
                 
             LOGGER.debug(f"Writing to _temp.sql file: {write_string}")
             f.write(write_string)
@@ -444,6 +442,7 @@ class SQLTransformer(cst.CSTTransformer):
                 f.close()
                 skip_model_transformer = True
                 LOGGER.debug(f"Created new file: {output_filename}.py. Wrote updated models to file. SKIPPING MODEL TRANSFORMER")
+            source_code = custom_model_imports + source_code
 
         
         # "monorepo" Mode: Write the updated models to a single file, corresponding to all scanned files

@@ -1,10 +1,10 @@
 
-from test_models import InsertSmartPerson
-
+from pydantic import BaseModel
 from watchDawg import db_connect
-from sql_transformer import sql, ExpansionList, ExpansionScalarList, ExpansionObject, ExpansionObjectList
+from sql_transformer import sql, ExpansionList, ExpansionScalarList, ExpansionObject, ExpansionModel, ExpansionObjectList, ExpansionModelList
 from typing import List
 import libcst as cst
+from model_library import Account
 
 # Look up snapshot testing, pyTest Snapshot
 
@@ -44,9 +44,11 @@ def main():
     # # Dynamic insertion
     # insert_normal_person: InsertNormalPerson = sql("INSERT INTO stupid_test_table (name, age, email) VALUES (:name, :age, :email);")
     # Dyanmic object insertion - single object        
-    insert_smart_person: InsertSmartPerson = sql("INSERT INTO stupid_test_table (name, age, email) VALUES :account;",
+    
+
+    insert_smart_person = sql("INSERT INTO stupid_test_table (name, age, email) VALUES :account;",
                               ExpansionList(expansions=[
-                                ExpansionObject(param_name="account", object_vars=["name", "age", "email"])
+                                ExpansionModel(param_name="account", model=Account, source_file="model_library.py")
                               ]) 
                             )  
 
