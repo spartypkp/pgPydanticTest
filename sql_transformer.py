@@ -17,6 +17,7 @@ import libcst as cst
 from libcst.codemod import CodemodContext
 from libcst.metadata import ParentNodeProvider
 import psycopg
+from psycopg import sql as ps_sql
 from psycopg.types.json import Jsonb
 from psycopg.rows import class_row, dict_row
 from typing import List, Any, Optional, TypeVar, Callable, Union, get_args, get_origin, Dict
@@ -53,7 +54,7 @@ class ExpansionModel(BaseModel):
 
     @computed_field
     @property
-    def object_vars(self) -> List[str]:
+    def model_fields(self) -> List[str]:
         # Return the names of the fields in the Pydantic model
         return self.pydantic_type.__fields__.keys()
     
@@ -73,7 +74,7 @@ class ExpansionModelList(BaseModel):
 
     @computed_field
     @property
-    def object_vars(self) -> List[str]:
+    def model_fields(self) -> List[str]:
         # Return the names of the fields in the Pydantic model
         return self.pydantic_type.__fields__.keys()
     
@@ -671,7 +672,55 @@ def pascal_case(name: str) -> str:
     # Example input: "select_federal_rows"
     # Example output: "SelectFederalRows"
     return "".join(map(str.title, name.split("_")))
-    
+
+# Composable: the base class exposing the common interface
+# |__ SQL: a literal snippet of an SQL query
+# |__ Identifier: a PostgreSQL identifier or dot-separated sequence of identifiers
+# |__ Literal: a value hardcoded into a query
+# |__ Placeholder: a %s-style placeholder whose value will be added later e.g. by execute()
+# |__ Composed: a sequence of Composable instances.
+
+def sql_query_builder(sql_query: str, parameters: Dict[str, Any], expansions: ExpansionList):
+    in_progress_query = sql_query
+    replacements = {}
+    for expansion in expansions:
+        if isinstance(expansion, ExpansionScalarList):
+            target_variable = expansion.param_name
+            in_progress_query = in_progress_query.replace(f":{target_variable}", f"%({target_variable})s")
+            scalar_list_replacement = ', '.join(['%s'] * len(parameters[target_variable]))
+            replacements[f"{target_variable}"] = scalar_list_replacement
+            in_progress_query = in_progress_query.replace(f":{target_variable}", f"{{{target_variable}}}")
+            continue
+
+            
+        if isinstance(expansion, ExpansionModel) or isinstance(expansion, ExpansionModelList):
+            # What is the name of the pydantic model?
+            target_variable = expansion.param_name
+            # Field names of the pydantic model
+            model_fields = expansion.model_fields
+
+            # Create SQL Identifier for each field
+            model_field_replacement = ps_sql.SQL(', ').join(map(ps_sql.Identifier, model_fields))
+            # Prepare the query for field replacement
+            in_progress_query = in_progress_query.replace(f"{target_variable}.fields", f"{{{target_variable}.fields}}")
+            # Add the replacement to the replacements dictionary
+            replacements[f"{target_variable}.fields"] = model_field_replacement
+
+            if isinstance(expansion, ExpansionModel):
+                model_value_replacement = ', '.join(['%s'] * len(model_fields))
+            else:
+                model_value_replacement = ', '.join(['(' + ', '.join(['%s'] * len(model_fields)) + ')' for _ in range(len(parameters[target_variable]))])
+            in_progress_query = in_progress_query.replace(f"{target_variable}.values", f"{{{target_variable}.values}}")
+            replacements[f"{target_variable}.values"] = model_value_replacement
+            
+
+            
+
+    model_fields = ["name", "age", "email"]
+    q1 = ps_sql.SQL("INSERT INTO my_table ({}) VALUES ({})").format(
+    ps_sql.SQL(', ').join(map(ps_sql.Identifier, model_fields)),
+    ps_sql.SQL(', ').join(ps_sql.Placeholder() * len(parameters)))
+    print(q1.as_string)
 
 def db_connect(row_factory=None):
     """ Connect to the PostgreSQL database server """
