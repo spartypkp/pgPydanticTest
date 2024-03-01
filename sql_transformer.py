@@ -156,7 +156,7 @@ class SQLTransformer(cst.CSTTransformer):
                 # LOGGER.debug(f"Expansions: {expansions}")
             
                 for expansion in expansions:
-                    LOGGER.debug(expansion.value.func.value)
+                    # LOGGER.debug(expansion.value.func.value)
                     # LOGGER.debug(f"Type of expansion: {type(expansion.value.func.value)}")
                     param_name = expansion.value.args[0].value.value.lstrip('"').rstrip('"')
                     # LOGGER.debug(f"Param name: {param_name}")
@@ -347,7 +347,7 @@ class SQLTransformer(cst.CSTTransformer):
         skip_model_transformer = False
         # "default" Mode: Write the updated modesl to a new file, corresponding to each scanned file
         if output_mode != "monorepo":
-            LOGGER.debug(f"Output mode: {output_mode}")
+            # LOGGER.debug(f"Output mode: {output_mode}")
             output_filename = f"{self.filename_without_extension}_models"
             try:
                 with open(f"{output_filename}.py", "r") as f:

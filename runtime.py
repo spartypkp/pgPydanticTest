@@ -26,8 +26,12 @@ from pydantic import BaseModel, computed_field
 import logging
 import inspect
 import importlib
-from sql_transformer import ExpansionList, ExpansionScalarList, ExpansionModel, ExpansionModelList
-
+from sql_transformer import ExpansionList, ExpansionScalarList, ExpansionModel, ExpansionModelList, SQLTransformer
+import os
+from model_transformer import ModelTransformer, add_module
+DIR = os.path.dirname(os.path.realpath(__file__))
+parent = os.path.dirname(DIR)
+sys.path.append(parent)
 
 LOGGER = None
 def main():
