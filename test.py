@@ -21,9 +21,11 @@ def main():
     # Let's say I want to insert a single account into the database.
     # I could hardcode the values, but I want to insert a Pydantic model dynamically instead.
 
+    # /* @param (name, email, age) -> account
+    # INSERT INTO 
 
     ## WARNING: Your pydantic model MUST be named the corresponding SQL variable. :account -> Account
-    insert_single_account = sql("INSERT INTO stupid_test_table (account.fields) VALUES (account.values);",
+    insert_single_account = sql("INSERT INTO stupid_test_table (name, email, age) VALUES (account.values);",
                               ExpansionList(expansions=[
                                 ExpansionModel(param_name="account", pydantic_type=Account, source_file="model_library.py")
                               ]) 
