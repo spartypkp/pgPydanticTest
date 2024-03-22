@@ -26,7 +26,7 @@ from pydantic import BaseModel, computed_field
 import logging
 import inspect
 import importlib
-from runtime import pascal_case
+
 
 import os
 from model_transformer import ModelTransformer, add_module
@@ -441,6 +441,9 @@ def check_for_valid_sql_invocation(node: cst.Call) -> bool:
     
     return True
 
-
+def pascal_case(name: str) -> str:
+    # Example input: "select_federal_rows"
+    # Example output: "SelectFederalRows"
+    return "".join(map(str.title, name.split("_")))
 if __name__ == "__main__":
     main()

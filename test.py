@@ -1,7 +1,8 @@
 
 
 from pydantic import BaseModel
-from sql_transformer import sql, ExpansionList, ExpansionScalarList, ExpansionModel, ExpansionModelList, db_connect, sql_query_builder
+from sql_transformer import ExpansionList, ExpansionScalarList, ExpansionModel, ExpansionModelList
+from runtime import sql, db_connect, sql_query_builder
 from typing import List
 import libcst as cst
 from model_library import Account
@@ -11,6 +12,16 @@ from model_library import Account
 
 def main():
     # Make sure you run sql_transformer, and have config.py filled out.
+    
+    fields = Account.model_fields.keys()
+    
+    
+    initialized_account = Account(name="Will", age=24, email="hire@me.com")
+
+    sql_select = f"INSERT INTO stupid_test_table (name, age, email) VALUES {Account};"
+    print(sql_select)
+    sql_select2 = f"INSERT INTO stupid_test_table (name, age, email) VALUES {initialized_account};"
+    exit(1)
     
     ## Save, then actually Run this file before uncommenting the rest of the code below. Follow on queries need this stupid table.
     # create_test_table: CreateTestTable = sql("CREATE TABLE IF NOT EXISTS stupid_test_table (name TEXT, age INTEGER, email TEXT);")
@@ -23,9 +34,9 @@ def main():
 
     # /* @param (name, email, age) -> account
     # INSERT INTO 
-
+    will = Account(name="Will", age=24, email="hire@me.com")
     ## WARNING: Your pydantic model MUST be named the corresponding SQL variable. :account -> Account
-    insert_single_account = sql("INSERT INTO stupid_test_table (name, email, age) VALUES (account.values);",
+    insert_single_account = sql(f"INSERT INTO stupid_test_table (name, email, age) VALUES {Account};",
                               ExpansionList(expansions=[
                                 ExpansionModel(param_name="account", pydantic_type=Account, source_file="model_library.py")
                               ]) 
@@ -51,11 +62,11 @@ def main():
     # A very common problem, except I want to dynamically use Pydantic models instead of traditional SQL parameters.
 
     ## WARNING: Your pydantic model MUST be named the corresponding SQL variable. :account -> Account. Passing :accounts here will break the query (trust me)
-    # insert_multiple_accounts = sql("INSERT INTO stupid_test_table (name, age, email) VALUES :account;",
-    #                             ExpansionList(expansions=[
-    #                                 ExpansionModelList(param_name="account", pydantic_type=Account, source_file="model_library.py")
-    #                             ])
-    #                         )
+    insert_multiple_accounts = sql("INSERT INTO stupid_test_table (name, age, email) VALUES :account;",
+                                ExpansionList(expansions=[
+                                    ExpansionModelList(param_name="account", pydantic_type=Account, source_file="model_library.py")
+                                ])
+                            )
     # ## Result doesn't matter with insertion, should return an empty List
     # # Option 1: Create the paramters beforehand
     # account_list = [Account(name="Will2", age=25, email="plzhire@me.com"), Account(name="Sean2", age=41, email="light@weight.com")]
