@@ -96,9 +96,25 @@ class SQLTransformer(cst.CSTTransformer):
         self.filename = filepath.split("/")[-1]
         self.filename_without_extension = self.filename.replace(".py", "")
         self.local_cache = {}
+        self.imports = {}
         # LOGGER.info(f"SQLTransformer initialized for file: {self.filename}")
 
-    
+    def visit_Import(self, node: cst.Import) -> None:
+        for alias in node.names:
+            self.imports[alias.evaluated_alias] = alias.name.value
+
+    def visit_ImportFrom(self, node: cst.ImportFrom) -> None:
+        print(node)
+        if node.module is not None:
+            module_name = node.module.value
+            class_names = []
+            for name in node.names:
+                if name.asname is not None:
+                    class_names.append(name.asname)
+                else:
+                    class_names.append(name.name.value)
+            self.imports[module_name] = class_names
+
     def handle_assignment(self, node: Union[cst.Assign, cst.AnnAssign]) -> None:
         self.node_stack.append(node)
 
@@ -117,8 +133,85 @@ class SQLTransformer(cst.CSTTransformer):
         
         
         if check_for_valid_sql_invocation(original_node):
+            cst_string = original_node.args[0].value
+            if isinstance(cst_string, cst.FormattedString):
+                string_construction = []
+                parameter_expansions = []
+                for part in cst_string.parts:
+                    #print(part)
+                    if isinstance(part, cst.FormattedStringExpression):
+                        class_name, is_wrapped = analyze_formatted_string_expression(part)
+                        # Try and access the last word in the last string in string_construction
+                        variable_name = None
+                        is_primitive_type = False
+                        if string_construction:
+                            last_string = string_construction[-1]
+                            
+                            
+                            if last_string[-1] != " ":
+                                variable_name = last_string.split()[-1]
+                                print(f"Variable name: {variable_name}")
+                        
+                        # If class name denotes a primitive type
+                        if class_name in ["int", "str", "float", "bool"]:
+                            is_primitive_type = True
+                            if not variable_name:
+                                raise ValueError(f"Variable name not found for primitive Type: {class_name}")
+                        else:
+                            if not variable_name:
+                                variable_name = class_name.lower()
+                        
+                        string_to_replace = f":{variable_name}"
+                        parameter_expansion = f"\* @param {variable_name} -> "
+                        if is_wrapped:
+                            parameter_expansion += "("
+                        if is_primitive_type:
+                            parameter_expansion += "..."
+                        else:
+                            # Import the module and class dynamically
+                            # First, analyze the imports in the file we are transforming
+                            # Find the module the class is imported from, or if it is defined in the same file
+                            # Then, import the module and class dynamically
+                            print(self.imports)
+                            if class_name not in ["int", "str", "float", "bool"]:
+                                module_name = self.filename_without_extension
+                                for k,v in self.imports.items():
+                                    if class_name in v:
+                                        module_name = k
+                                        break
+                                
+                                
+                                module = importlib.import_module(module_name)
+                                class_type = getattr(module, class_name)
+                                print(class_type)
+                                field_representation = f"({', '.join(class_type.__fields__.keys())})"
+                                parameter_expansion += field_representation
+                                if is_wrapped:
+                                    parameter_expansion += "..."
+                                
+                        
+                        if is_wrapped:
+                            parameter_expansion += ")"
+                        parameter_expansion += "*/"
+                        
+                        string_construction.append(string_to_replace)
+                        parameter_expansions.append(parameter_expansion)
+                    else:
+                        string_construction.append(part.value)
+                sql_string = ''.join(string_construction)
+
+
+                            
+                        
+                                
+                           
+            else:
+
+                sql_string = updated_node.args[0].value.value.lstrip('"').rstrip('"')
             
-            sql_string = updated_node.args[0].value.value.lstrip('"').rstrip('"')
+            
+            #print(f" - Final SQL String: {sql_string}")
+                
             if sql_string[-1] != ";":
                 sql_string += ";"
 
@@ -136,83 +229,15 @@ class SQLTransformer(cst.CSTTransformer):
             
             assign_name = pascal_case(assign_name_raw)
 
-            native_sql = f"/* @name {assign_name} \n"
+            native_sql = f"\* @name {assign_name} */\n"
+            native_sql += '\n'.join(parameter_expansions) + "\n"
+            native_sql += sql_string
+            print(native_sql)
             
             # Example SQL String: INSERT INTO stupid_test_table (name, age, email) VALUES myaccount<class 'model_library.Account'>;
             # Example SQL String: INSERT INTO stupid_test_table (name, age, email) VALUES <class 'model_library.Account'>;
     
             # The regex pattern to match Python class string representations
-            pattern = r"(\w+)?\s*<class '([\w\.]+)'>"
-
-            # Find all matches in the SQL string
-            matches = re.findall(pattern, sql_string)
-
-            # For each match, split the match into the variable name, module and class name
-            classes = {}
-            for match in matches:
-                variable_name, class_string = match
-                is_primitive_type = True
-                module = None
-                # Indicates custom class with module name
-                if '.' in class_string:
-                    module, class_name = class_string.rsplit('.', 1)
-                    is_primitive_type = False
-                    # Infer the variable name from the custom class name
-                    if not variable_name:
-                        
-                        inferred_variable_name = class_name.lower()
-                # Require the variable name for primitive types
-                if not variable_name and is_primitive_type:
-                    raise ValueError(f"Variable name not found for primitive Type: {class_string}")
-
-                # Check if the class is wrapped in []
-                is_wrapped = sql_string[sql_string.index(class_string) - 1] == '[' and sql_string[sql_string.index(class_string) + len(class_string) + 1] == ']'
-
-                # Start construction of a new string to replace the match
-                replacement_string = ":"
-                parameter_expansion = "@param "
-                if not variable_name:
-                    replacement_string += inferred_variable_name
-                    parameter_expansion += inferred_variable_name
-                else:
-                    replacement_string += variable_name
-                    parameter_expansion += variable_name
-                parameter_expansion += " -> "
-
-                # If the class is wrapped in [], start with a (
-                if is_wrapped:
-                    parameter_expansion += "("
-
-                # If the class is a primitive type, add ... to parameter expansion
-                if is_primitive_type:
-                    parameter_expansion += "..."
-                else:
-                    # Import the module and class dynamically to get the fields
-                    module = importlib.import_module(module)
-                    class_type = getattr(module, class_name)
-                    field_representation = f"({', '.join(class_type.__fields__.keys())})"
-                    parameter_expansion += field_representation
-                
-                # If the class is wrapped in [], end with a )
-                if is_wrapped:
-                    parameter_expansion += ")"
-
-                
-                parameter_expansion += "*/\n"
-                # Replace the match with the replacement string
-                sql_string = sql_string.replace(f"{variable_name}{class_string}", replacement_string)
-                # Add the parameter expansion to the native SQL
-                native_sql += parameter_expansion
-                
-
-
-                classes[parameter_expansion] = (variable_name, class_name, module, is_wrapped, is_primitive_type)
-
-            print(classes)
-            print(native_sql)
-            print(sql_string)
-            
-            native_sql += sql_string
             
 
 
@@ -430,7 +455,10 @@ def check_for_valid_sql_invocation(node: cst.Call) -> bool:
     if len(args) != 1 and len(args) != 2:
         return False
     # Ensure that the function being called is `sql` and that the first argument is a string literal
-    if not m.matches(func_call, m.Name("sql")) or not m.matches(args[0].value, m.SimpleString()):
+    #print(func_call)
+    #print(type(args[0].value))
+
+    if not m.matches(func_call, m.Name("sql")) or not m.matches(args[0].value, m.FormattedString()):
         return False
     # Ensure that the second argument is of type List[Expansion]
     
@@ -475,5 +503,34 @@ def find_python_classes_in_sql(query: str):
 
 
     return extracted_info
+
+
+def analyze_formatted_string_expression(fse: cst.FormattedStringExpression):
+    """
+    Analyzes a FormattedStringExpression object to find class names and list wrapping.
+
+    Parameters:
+    - fse (cst.FormattedStringExpression): The formatted string expression to analyze.
+
+    Returns:
+    - Tuple containing:
+        - The cst.Name value if found, otherwise None.
+        - Boolean indicating if the cst.Name is wrapped in a list.
+    """
+    class_name = None
+    is_wrapped_in_list = False
+
+    # Check if the expression is a List
+    if isinstance(fse.expression, cst.List):
+        is_wrapped_in_list = True
+        # Iterate over elements in the list
+        for element in fse.expression.elements:
+            if isinstance(element.value, cst.Name):
+                # Extract the class name
+                class_name = element.value.value
+                break  # Assuming only one class name per list for this use case
+
+    return class_name, is_wrapped_in_list
+    
 if __name__ == "__main__":
     main()
