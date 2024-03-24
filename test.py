@@ -1,6 +1,7 @@
+from test_models import SqlInsertAccount
+
 from pydantic import BaseModel
-from sql_transformer import ExpansionList, ExpansionScalarList, ExpansionModel, ExpansionModelList
-from runtime import sql, db_connect, sql_query_builder
+from runtime import sql, db_connect
 from typing import List, Annotated
 import libcst as cst
 from model_library import Account
@@ -30,11 +31,11 @@ def main():
 
     ## Object pick
     # SQL comment syntax: @param paramName -> (name, age, email) dsflssd
-    sql_insert_account = sql(f"INSERT INTO account_table (name, age, email) VALUES {[Account]};")
-    print(sql_insert_account)
+    sql_insert_account: SqlInsertAccount = sql(f"INSERT INTO account_table (name, age, email) VALUES {[Account]};")
+    print(sql_insert_account) 
     
 
-    ## Array spread and pick  
+    ## Array spread and pick   
     # SQL comment syntax: @param paramName -> ((name, age, email)...)
     # sql_insert_accounts: SqlInsertAccounts = sql(f"INSERT INTO account_table (name, age, email) VALUES {Account};")
 

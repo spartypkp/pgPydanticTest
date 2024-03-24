@@ -298,6 +298,10 @@ def db_connect(row_factory=None):
         print(error)
         raise error
     
+def sql_executor():
+    pass
+    # Automatically handle safely inserting parameters into the SQL query, using pyscopg3's execute method
+    
 
 if __name__ == "__main__":
     main()

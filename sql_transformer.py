@@ -120,7 +120,7 @@ class SQLTransformer(cst.CSTTransformer):
                                 variable_name = class_name.lower()
                         
                         string_to_replace = f":{variable_name}"
-                        parameter_expansion = f"\* @param {variable_name} -> "
+                        parameter_expansion = f"  @param {variable_name} -> "
                         if is_wrapped:
                             parameter_expansion += "("
                         if is_primitive_type:
@@ -154,7 +154,7 @@ class SQLTransformer(cst.CSTTransformer):
                         
                         if is_wrapped:
                             parameter_expansion += ")"
-                        parameter_expansion += "*/"
+                        
                         
                         string_construction.append(string_to_replace)
                         parameter_expansions.append(parameter_expansion)
@@ -184,8 +184,8 @@ class SQLTransformer(cst.CSTTransformer):
             
             assign_name = pascal_case(assign_name_raw)
 
-            native_sql = f"\* @name {assign_name} */\n"
-            native_sql += '\n'.join(parameter_expansions) + "\n"
+            native_sql = f"/* @name {assign_name} \n"
+            native_sql += '\n'.join(parameter_expansions) + "\n*/\n"
             native_sql += sql_string
             print(native_sql)
             

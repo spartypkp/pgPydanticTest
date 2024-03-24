@@ -1,1 +1,15 @@
-{"InsertSingleAccount": {"sql_hash": 1302094733807820883, "sql_string": "INSERT INTO stupid_test_table (name, age, email) VALUES :account;", "native_sql": "/* @name InsertSingleAccount \n@param account -> (age, email, name)\n*/\nINSERT INTO stupid_test_table (name, age, email) VALUES :account;", "file_defined_in": "test.py", "files_used_in": [], "parameter_expansions": ["@param account -> (age, email, name)\n"], "custom_model_imports": ["from model_library import Account\n"]}}
+{
+    "InsertSingleAccount": {
+        "sql_hash": 1302094733807820883,
+        "sql_string": "INSERT INTO stupid_test_table (name, age, email) VALUES :account;",
+        "native_sql": "/* @name InsertSingleAccount \n@param account -> (age, email, name)\n*/\nINSERT INTO stupid_test_table (name, age, email) VALUES :account;",
+        "file_defined_in": "test.py",
+        "files_used_in": [],
+        "parameter_expansions": [
+            "@param account -> (age, email, name)\n"
+        ],
+        "custom_model_imports": [
+            "from model_library import Account\n"
+        ]
+    }
+}
