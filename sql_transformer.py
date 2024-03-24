@@ -141,75 +141,9 @@ class SQLTransformer(cst.CSTTransformer):
             assign_name = pascal_case(assign_name_raw)
             # LOGGER.debug(f"Pascal Assign name: {assign_name}")
 
-            # Get the second argument, if it exists
             
-            parameter_expansions = []
-            custom_model_imports = []
-            files_used_in = []        
-            # LOGGER.debug(f"Original SQL string: {sql_string}")
-
-            if len(updated_node.args) == 2:
-                expansions = updated_node.args[1].value.args[0].value.elements
-                # with open("TESTOUTPUT.txt", "w") as f:
-                #     f.write(str(expansions))
-                
-                # LOGGER.debug(f"Expansions: {expansions}")
+            # Example SQL String: INSERT INTO stupid_test_table (name, age, email) VALUES <class 'model_library.Account'>;
             
-                for expansion in expansions:
-                    # LOGGER.debug(expansion.value.func.value)
-                    # LOGGER.debug(f"Type of expansion: {type(expansion.value.func.value)}")
-                    param_name = expansion.value.args[0].value.value.lstrip('"').rstrip('"')
-                    # LOGGER.debug(f"Param name: {param_name}")
-                    
-                    # LOGGER.debug(f"Is scalar list: {expansion.value.func.value == 'ExpansionScalarList'}")
-                    if expansion.value.func.value == "ExpansionScalarList":
-                        sql_comment = f"@param {param_name} -> (...)\n"
-                        parameter_expansions.append(sql_comment)
-                        continue
-                    
-                    if expansion.value.func.value == "ExpansionModel" or expansion.value.func.value == "ExpansionModelList":
-                        pydantic_model = expansion.value.args[1].value.value
-                        source_file = expansion.value.args[2].value.value.lstrip('"').rstrip('"').replace(".py", "")
-
-                        # Get the pydantic model from the source file. Get the pydantic models .__fields__.keys()
-                        # Dynamically import the Pydantic model
-                        
-                        module = importlib.import_module(source_file)
-                        model = getattr(module, pydantic_model)
-
-                        # Get the model's fields
-                        fields = model.__fields__.keys()
-
-                        custom_model_import = f"from {source_file.replace('.py','')} import {pascal_case(param_name)}\n"
-                        if custom_model_import not in custom_model_imports:
-                            custom_model_imports.append(custom_model_import)
-                        
-                        obj_string = "("
-                        for field in fields:
-                            obj_string += f"{field}, "
-                        obj_string = obj_string[:-2] + ")"
-                        # LOGGER.debug(f"Object string: {obj_string}")
-
-                        if expansion.value.func.value == "ExpansionModel":
-                            
-                            sql_comment = f"@param {param_name} -> {obj_string}\n"
-                            parameter_expansions.append(sql_comment)
-                            continue
-                        else:
-                            sql_comment = f"@param {param_name} -> ({obj_string}...)\n"
-                            
-                            parameter_expansions.append(sql_comment)
-                            continue
-                    
-                   
-                            
-                    
-                
-
-                # Regular paramter expansion, no need to modify the sql_string
-            
-            # LOGGER.debug(f"Parameter expansions: {parameter_expansions}")
-        
 
             sql_hash = hash(sql_string)
             sql_key = assign_name
@@ -445,5 +379,37 @@ def pascal_case(name: str) -> str:
     # Example input: "select_federal_rows"
     # Example output: "SelectFederalRows"
     return "".join(map(str.title, name.split("_")))
+
+
+def find_python_classes_in_sql(query: str):
+    # Regex pattern to match Python class representations, including lists and built-in types
+    pattern = r"(\[)?<class '([\w\.]*)(\w+)'>\]?"
+    
+    matches = re.findall(pattern, query)
+    
+    extracted_info = []
+    for is_list, module_with_class, class_name in matches:
+        is_list_bool = bool(is_list)  # Converts non-empty string to True, empty to False
+        module_name = module_with_class.rpartition('.')[0]  # Extract module, empty if built-in type
+        
+
+        # Dynamically import the class so that it can be used in the SQLTransformer
+        module = importlib.import_module(module_name)
+        class_ = getattr(module, class_name)
+
+        # If the class is a subclass of Pydantic's BaseModel, create the expansion
+        if issubclass(class_, BaseModel):
+            class_fields = class_.model_fields.keys()
+            class_fields = f"({', '.join(class_fields)})"
+            if is_list_bool:
+                class_fields = f"({class_fields}...)"
+            expansion = f"@param {class_name} -> {class_fields}"
+        elif is_list_bool:
+            
+            expansion = f"@param {class_name} -> (...)"
+        
+
+
+    return extracted_info
 if __name__ == "__main__":
     main()

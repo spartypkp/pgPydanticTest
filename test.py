@@ -3,7 +3,7 @@
 from pydantic import BaseModel
 from sql_transformer import ExpansionList, ExpansionScalarList, ExpansionModel, ExpansionModelList
 from runtime import sql, db_connect, sql_query_builder
-from typing import List
+from typing import List, Annotated
 import libcst as cst
 from model_library import Account
 
@@ -14,13 +14,16 @@ def main():
     # Make sure you run sql_transformer, and have config.py filled out.
     
     fields = Account.model_fields.keys()
+    print(f"({', '.join(fields)})")
     
     
     initialized_account = Account(name="Will", age=24, email="hire@me.com")
-
-    sql_select = f"INSERT INTO stupid_test_table (name, age, email) VALUES {Account};"
-    print(sql_select)
-    sql_select2 = f"INSERT INTO stupid_test_table (name, age, email) VALUES {initialized_account};"
+    
+    sql_insert_account = f"INSERT INTO stupid_test_table (name, age, email) VALUES {Account};"
+    
+    sql_insert_accounts = f"INSERT INTO stupid_test_table (name, age, email) VALUES {[Account]};"
+    print(sql_insert_account)
+    print(sql_insert_accounts)
     exit(1)
     
     ## Save, then actually Run this file before uncommenting the rest of the code below. Follow on queries need this stupid table.
