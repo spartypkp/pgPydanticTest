@@ -26,7 +26,7 @@ from pydantic import BaseModel, computed_field
 import logging
 import inspect
 import importlib
-from sql_transformer import ExpansionList, ExpansionScalarList, ExpansionModel, ExpansionModelList, SQLTransformer
+from sql_transformer import SQLTransformer
 import os
 from model_transformer import ModelTransformer, add_module
 DIR = os.path.dirname(os.path.realpath(__file__))
@@ -196,7 +196,7 @@ def create_logger(verbose=False):
 import inspect
 
 T = TypeVar('T')
-def sql(query: str, expansionList: Optional[ExpansionList] = []) -> T:
+def sql(query: str) -> T:
     # Get the filename of the file that called this function
     with open("cache.json", "r") as f:
         cache = json.load(f)
@@ -274,47 +274,6 @@ def pascal_case(name: str) -> str:
 # |__ Placeholder: a %s-style placeholder whose value will be added later e.g. by execute()
 # |__ Composed: a sequence of Composable instances.
 
-def sql_query_builder(sql_query: str, parameters: Dict[str, Any], expansions: ExpansionList):
-    in_progress_query = sql_query
-    replacements = {}
-    for expansion in expansions:
-        if isinstance(expansion, ExpansionScalarList):
-            target_variable = expansion.param_name
-            in_progress_query = in_progress_query.replace(f":{target_variable}", f"%({target_variable})s")
-            scalar_list_replacement = ', '.join(['%s'] * len(parameters[target_variable]))
-            replacements[f"{target_variable}"] = scalar_list_replacement
-            in_progress_query = in_progress_query.replace(f":{target_variable}", f"{{{target_variable}}}")
-            continue
-
-            
-        if isinstance(expansion, ExpansionModel) or isinstance(expansion, ExpansionModelList):
-            # What is the name of the pydantic model?
-            target_variable = expansion.param_name
-            # Field names of the pydantic model
-            model_fields = expansion.model_fields
-
-            # Create SQL Identifier for each field
-            model_field_replacement = ps_sql.SQL(', ').join(map(ps_sql.Identifier, model_fields))
-            # Prepare the query for field replacement
-            in_progress_query = in_progress_query.replace(f"{target_variable}.fields", f"{{{target_variable}.fields}}")
-            # Add the replacement to the replacements dictionary
-            replacements[f"{target_variable}.fields"] = model_field_replacement
-
-            if isinstance(expansion, ExpansionModel):
-                model_value_replacement = ', '.join(['%s'] * len(model_fields))
-            else:
-                model_value_replacement = ', '.join(['(' + ', '.join(['%s'] * len(model_fields)) + ')' for _ in range(len(parameters[target_variable]))])
-            in_progress_query = in_progress_query.replace(f"{target_variable}.values", f"{{{target_variable}.values}}")
-            replacements[f"{target_variable}.values"] = model_value_replacement
-            
-
-            
-
-    model_fields = ["name", "age", "email"]
-    q1 = ps_sql.SQL("INSERT INTO my_table ({}) VALUES ({})").format(
-    ps_sql.SQL(', ').join(map(ps_sql.Identifier, model_fields)),
-    ps_sql.SQL(', ').join(ps_sql.Placeholder() * len(parameters)))
-    print(q1.as_string)
 
 def db_connect(row_factory=None):
     """ Connect to the PostgreSQL database server """

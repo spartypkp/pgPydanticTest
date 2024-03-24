@@ -36,51 +36,6 @@ sys.path.append(parent)
 
 
 # Making impossible states impossible: Talk recommended by Sean
-class ExpansionScalarList(BaseModel):
-    """
-    param_name: The name of the parameter in the SQL string, which denotes the list of scalars being inserted.
-    Use this class when a dynamically inserted variable should be a list of scalars."""
-    param_name: str
-
-class ExpansionModel(BaseModel):
-    """
-    param_name: The name of the parameter in the SQL string, which denotes the object being inserted.
-    pydantic_type: The Pydantic model that the object should be an instance of.
-    source_file: The file that the Pydantic model is defined in.
-    Use this class when dynamically inserted variables are being represented by a single object in the SQL string.
-    """
-    param_name: str
-    pydantic_type: Any
-    source_file: str
-
-    @computed_field
-    @property
-    def model_fields(self) -> List[str]:
-        # Return the names of the fields in the Pydantic model
-        return self.pydantic_type.__fields__.keys()
-    
-class ExpansionModelList(BaseModel):
-    """
-    param_name: The name of the parameter in the SQL string, which denotes the object being inserted.
-    pydantic_type: The Pydantic model that the object should be an instance of.
-    source_file: The file that the Pydantic model is defined in.
-    Use this class when dynamically inserted variables are being represented by a single object in the SQL string, however you want to insert multiple.
-    """
-    param_name: str
-    pydantic_type: Any
-    source_file: str
-
-
-    @computed_field
-    @property
-    def model_fields(self) -> List[str]:
-        # Return the names of the fields in the Pydantic model
-        return self.pydantic_type.__fields__.keys()
-    
-class ExpansionList(BaseModel):
-    expansions: List[Union[ExpansionScalarList, ExpansionModel, ExpansionModelList]]
-
-
 
 def main():
     pass
@@ -97,6 +52,7 @@ class SQLTransformer(cst.CSTTransformer):
         self.filename_without_extension = self.filename.replace(".py", "")
         self.local_cache = {}
         self.imports = {}
+        self.custom_imports = {}
         # LOGGER.info(f"SQLTransformer initialized for file: {self.filename}")
 
     def visit_Import(self, node: cst.Import) -> None:
@@ -104,7 +60,7 @@ class SQLTransformer(cst.CSTTransformer):
             self.imports[alias.evaluated_alias] = alias.name.value
 
     def visit_ImportFrom(self, node: cst.ImportFrom) -> None:
-        print(node)
+        
         if node.module is not None:
             module_name = node.module.value
             class_names = []
@@ -134,9 +90,11 @@ class SQLTransformer(cst.CSTTransformer):
         
         if check_for_valid_sql_invocation(original_node):
             cst_string = original_node.args[0].value
+            custom_model_imports = []
             if isinstance(cst_string, cst.FormattedString):
                 string_construction = []
                 parameter_expansions = []
+
                 for part in cst_string.parts:
                     #print(part)
                     if isinstance(part, cst.FormattedStringExpression):
@@ -150,7 +108,7 @@ class SQLTransformer(cst.CSTTransformer):
                             
                             if last_string[-1] != " ":
                                 variable_name = last_string.split()[-1]
-                                print(f"Variable name: {variable_name}")
+                                
                         
                         # If class name denotes a primitive type
                         if class_name in ["int", "str", "float", "bool"]:
@@ -172,18 +130,22 @@ class SQLTransformer(cst.CSTTransformer):
                             # First, analyze the imports in the file we are transforming
                             # Find the module the class is imported from, or if it is defined in the same file
                             # Then, import the module and class dynamically
-                            print(self.imports)
+                            
                             if class_name not in ["int", "str", "float", "bool"]:
                                 module_name = self.filename_without_extension
                                 for k,v in self.imports.items():
                                     if class_name in v:
                                         module_name = k
+                                        if module_name not in self.custom_imports:
+                                            self.custom_imports[module_name] = []
+                                        if class_name not in self.custom_imports[module_name]:
+                                            self.custom_imports[module_name].append(class_name)
                                         break
                                 
                                 
                                 module = importlib.import_module(module_name)
                                 class_type = getattr(module, class_name)
-                                print(class_type)
+                                
                                 field_representation = f"({', '.join(class_type.__fields__.keys())})"
                                 parameter_expansion += field_representation
                                 if is_wrapped:
@@ -198,15 +160,8 @@ class SQLTransformer(cst.CSTTransformer):
                         parameter_expansions.append(parameter_expansion)
                     else:
                         string_construction.append(part.value)
-                sql_string = ''.join(string_construction)
-
-
-                            
-                        
-                                
-                           
+                sql_string = ''.join(string_construction)                        
             else:
-
                 sql_string = updated_node.args[0].value.value.lstrip('"').rstrip('"')
             
             
@@ -242,57 +197,17 @@ class SQLTransformer(cst.CSTTransformer):
 
 
             sql_hash = hash(sql_string)
-            sql_key = assign_name
+        
             # LOGGER.debug(f"SQL key: {sql_key}")
             invocation_metadata = {
-                "sql_hash": sql_hash,
+                "query_name": assign_name,
                 "sql_string": sql_string,
-                "native_sql": "",
+                "native_sql": native_sql,
                 "file_defined_in": self.filename,
+                "custom_model_imports": set()
             }
-            cache = None
-            # Check if the sql_key is in the cache.json file
-            # with open("cache.json", "r") as f:
-            #     text = f.read()
-            #     cache = json.loads(text)
-            #     # LOGGER.debug(f"Loaded cache: {cache}")
-            #     # Case 1: not a completely new invocation
-            #     if sql_key in cache:
-            #         # LOGGER.debug(f"Cache for sql_key: {sql_key} exists:\n{cache[sql_key]}")
-            #         # Case 2: Changed sql, New invocation should override old invocation
+            self.local_cache[sql_hash] = invocation_metadata
 
-            #         if cache[sql_key]["sql_string"] != sql_string:
-            #             # LOGGER.debug(f"Case 2: Changed sql, New invocation should override old invocation")
-            #             # LOGGER.critical(f"Warning! You are overriding an existing SQL invocation, which will regenerate the models. If you want to keep the old models with the same name, please change the variable name you are assinging to.")
-            #             # Update the invocation_metadata in cache.json
-            #             cache[sql_key] = invocation_metadata
-            #         # Case 3: Unchanged invocation, maybe update files_used_in
-            #         else:
-            #             # LOGGER.debug(f"Case 3: Unchanged invocation, Do nothing")      
-            #             target_files_used_in = cache[sql_key]["files_used_in"]
-            #             # Case: File not already in files_used_in
-            #             if self.filename not in target_files_used_in:
-            #                 cache[sql_key]["files_used_in"].append(self.filename)
-            #             # Case: File already in files_used_in, duplicate invocation of same sql in same file
-            #             else:
-            #                 pass
-
-            #             return updated_node
-            #     # Case 4: Completely new invocation
-            #     else:
-            #         # LOGGER.debug(f"Case 4: Completely new invocation")
-            #         cache[sql_key] = invocation_metadata
-
-            
-            
-            
-            # cache[sql_key]["native_sql"] = native_sql
-            
-            # self.local_cache[sql_key] = invocation_metadata
-
-            # # LOGGER.info(f"Updated cache: {cache}")
-            # with open("cache.json", "w") as f:
-            #     f.write(json.dumps(cache))
            
         return updated_node
     
@@ -320,7 +235,7 @@ class SQLTransformer(cst.CSTTransformer):
     
     def leave_Module(self, original_node: cst.Module, updated_node: cst.Module) -> cst.Module:
         
-        custom_model_imports = set()
+        
         converted_filename = self.filename_without_extension + "_temp.sql"
         if len(self.local_cache.keys()) == 0:
             # LOGGER.info(f"No new or updated SQL invocations found in file.")
@@ -329,8 +244,7 @@ class SQLTransformer(cst.CSTTransformer):
             write_string = ""
             for k,v in self.local_cache.items():
                 write_string += v["native_sql"] + "\n\n"
-                for model_import in v["custom_model_imports"]:
-                    custom_model_imports.add(model_import)
+                
                 
                 
             # LOGGER.debug(f"Writing to _temp.sql file: {write_string}")
@@ -339,7 +253,7 @@ class SQLTransformer(cst.CSTTransformer):
         # Run pgtyped-pydantic to regenerate models
         cfg = 'config.json'
         file_override = converted_filename
-        custom_model_imports = "\n".join(list(custom_model_imports))
+        
         
         # Running repository as python subprocess
         command = ['npx', 'pgtyped-pydantic', '-c', cfg, '-f', file_override]
@@ -348,7 +262,10 @@ class SQLTransformer(cst.CSTTransformer):
 
         # Retrieve the updated models from process.stdout, convert to string
         raw_string = process.stdout.decode('utf-8')
+        print(raw_string)
+
         raw_errors = process.stderr.decode('utf-8')
+        print(raw_errors)
         
         #LOGGER.debug(f"Raw pgtyped-pydantic output: {raw_string}")
         # LOGGER.debug(f"Raw pgtyped-pydantic errors: {raw_errors}")
@@ -362,6 +279,9 @@ class SQLTransformer(cst.CSTTransformer):
             as_class = as_module.body[0]
             updated_model_classes.append(as_class)
 
+        custom_model_imports_str = ""
+        for k,v in self.custom_imports.items():
+            custom_model_imports_str += f"from {k} import {', '.join(v)}\n"
         
         with open("config.json", "r") as f:
             config = json.load(f)
@@ -376,14 +296,14 @@ class SQLTransformer(cst.CSTTransformer):
                 with open(f"{output_filename}.py", "r") as f:
                     source_code = f.read()
                 f.close()
-                source_code = custom_model_imports + "\n" + source_code
+                source_code = custom_model_imports_str + "\n" + source_code
                 # LOGGER.debug(f"Retrieved source code from {output_filename}.py")
             except:
                 source_code = "from typing import List, Optional, Dict, Any, Union\nimport datetime\nfrom pydantic import BaseModel\nfrom typing_extensions import NewType\nfrom psycopg.rows import class_row\nimport psycopg\nfrom sql_transformer import sql_executor\n\n"
                 for mod in updated_model_classes_raw:
                     source_code += mod
-                if custom_model_imports not in source_code:
-                    source_code = custom_model_imports + "\n" + source_code
+                if custom_model_imports_str not in source_code:
+                    source_code = custom_model_imports_str + "\n" + source_code
                 # File does not exist yet, create it
                 with open(f"{output_filename}.py", "w") as f:
                     f.write(source_code)
@@ -424,9 +344,9 @@ class SQLTransformer(cst.CSTTransformer):
         # Regardless of output mode, update the imports in the scanned file
         names = []
         for k, v in self.local_cache.items():
+             
             
-            
-            names.append(cst.ImportAlias(name=cst.Name(k)))
+            names.append(cst.ImportAlias(name=cst.Name(v["query_name"])))
             
         new_import = cst.ImportFrom(
             module=cst.Name(output_filename),
@@ -471,38 +391,6 @@ def pascal_case(name: str) -> str:
     # Example input: "select_federal_rows"
     # Example output: "SelectFederalRows"
     return "".join(map(str.title, name.split("_")))
-
-
-def find_python_classes_in_sql(query: str):
-    # Regex pattern to match Python class representations, including lists and built-in types
-    pattern = r"(\[)?<class '([\w\.]*)(\w+)'>\]?"
-    
-    matches = re.findall(pattern, query)
-    
-    extracted_info = []
-    for is_list, module_with_class, class_name in matches:
-        is_list_bool = bool(is_list)  # Converts non-empty string to True, empty to False
-        module_name = module_with_class.rpartition('.')[0]  # Extract module, empty if built-in type
-        
-
-        # Dynamically import the class so that it can be used in the SQLTransformer
-        module = importlib.import_module(module_name)
-        class_ = getattr(module, class_name)
-
-        # If the class is a subclass of Pydantic's BaseModel, create the expansion
-        if issubclass(class_, BaseModel):
-            class_fields = class_.model_fields.keys()
-            class_fields = f"({', '.join(class_fields)})"
-            if is_list_bool:
-                class_fields = f"({class_fields}...)"
-            expansion = f"@param {class_name} -> {class_fields}"
-        elif is_list_bool:
-
-            expansion = f"@param {class_name} -> (...)"
-        
-
-
-    return extracted_info
 
 
 def analyze_formatted_string_expression(fse: cst.FormattedStringExpression):

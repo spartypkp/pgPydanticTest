@@ -1,5 +1,3 @@
-
-
 from pydantic import BaseModel
 from sql_transformer import ExpansionList, ExpansionScalarList, ExpansionModel, ExpansionModelList
 from runtime import sql, db_connect, sql_query_builder
@@ -17,6 +15,13 @@ def main():
     # These expansions are based on the SQL comment syntax that the original pgtyped library uses for SQL files.
     # Named parameters are required only for primitive types, pydantic models use the name of the model as the parameter name.
 
+    # CREATE TABLE account_table (
+    #     name TEXT,
+    #     age INTEGER,
+    #     email TEXT
+    # );
+
+
     ## Array spread
     # SQL comment syntax: @param paramName -> (...)    
     # ages = [24, 25, 26]
@@ -29,7 +34,7 @@ def main():
     print(sql_insert_account)
     
 
-    ## Array spread and pick
+    ## Array spread and pick  
     # SQL comment syntax: @param paramName -> ((name, age, email)...)
     # sql_insert_accounts: SqlInsertAccounts = sql(f"INSERT INTO account_table (name, age, email) VALUES {Account};")
 
