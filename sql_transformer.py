@@ -115,16 +115,12 @@ class SQLTransformer(cst.CSTTransformer):
     
     def leave_Call(self, original_node: cst.Call, updated_node: cst.Call) -> cst.Call:
         
-        # LOGGER.debug(f"Leaving Call: {updated_node.func.value}")
-        # LOGGER.debug(f"Is valid SQL invocation: {check_for_valid_sql_invocation(original_node)}")
+        
         if check_for_valid_sql_invocation(original_node):
             
             sql_string = updated_node.args[0].value.value.lstrip('"').rstrip('"')
-            # LOGGER.debug(f"Found SQL string: {sql_string}")
             if sql_string[-1] != ";":
-                # LOGGER.critical(f"SQL string does not end with a semicolon: {sql_string}")
                 sql_string += ";"
-                # LOGGER.critical(f"Added semicolon to end of SQL string: {sql_string}")
 
             # Inside the Call Node, this gets the parent Assign node
             if self.node_stack:
@@ -137,13 +133,88 @@ class SQLTransformer(cst.CSTTransformer):
                 assign_name_raw = last_assign.target.value.lstrip('"').rstrip('"')
             else:
                 assign_name_raw = last_assign.targets[0].target.value.lstrip('"').rstrip('"')
-            # LOGGER.debug(f"Assign name raw: {assign_name_raw}")
+            
             assign_name = pascal_case(assign_name_raw)
-            # LOGGER.debug(f"Pascal Assign name: {assign_name}")
 
+            native_sql = f"/* @name {assign_name} \n"
             
+            # Example SQL String: INSERT INTO stupid_test_table (name, age, email) VALUES myaccount<class 'model_library.Account'>;
             # Example SQL String: INSERT INTO stupid_test_table (name, age, email) VALUES <class 'model_library.Account'>;
+    
+            # The regex pattern to match Python class string representations
+            pattern = r"(\w+)?\s*<class '([\w\.]+)'>"
+
+            # Find all matches in the SQL string
+            matches = re.findall(pattern, sql_string)
+
+            # For each match, split the match into the variable name, module and class name
+            classes = {}
+            for match in matches:
+                variable_name, class_string = match
+                is_primitive_type = True
+                module = None
+                # Indicates custom class with module name
+                if '.' in class_string:
+                    module, class_name = class_string.rsplit('.', 1)
+                    is_primitive_type = False
+                    # Infer the variable name from the custom class name
+                    if not variable_name:
+                        
+                        inferred_variable_name = class_name.lower()
+                # Require the variable name for primitive types
+                if not variable_name and is_primitive_type:
+                    raise ValueError(f"Variable name not found for primitive Type: {class_string}")
+
+                # Check if the class is wrapped in []
+                is_wrapped = sql_string[sql_string.index(class_string) - 1] == '[' and sql_string[sql_string.index(class_string) + len(class_string) + 1] == ']'
+
+                # Start construction of a new string to replace the match
+                replacement_string = ":"
+                parameter_expansion = "@param "
+                if not variable_name:
+                    replacement_string += inferred_variable_name
+                    parameter_expansion += inferred_variable_name
+                else:
+                    replacement_string += variable_name
+                    parameter_expansion += variable_name
+                parameter_expansion += " -> "
+
+                # If the class is wrapped in [], start with a (
+                if is_wrapped:
+                    parameter_expansion += "("
+
+                # If the class is a primitive type, add ... to parameter expansion
+                if is_primitive_type:
+                    parameter_expansion += "..."
+                else:
+                    # Import the module and class dynamically to get the fields
+                    module = importlib.import_module(module)
+                    class_type = getattr(module, class_name)
+                    field_representation = f"({', '.join(class_type.__fields__.keys())})"
+                    parameter_expansion += field_representation
+                
+                # If the class is wrapped in [], end with a )
+                if is_wrapped:
+                    parameter_expansion += ")"
+
+                
+                parameter_expansion += "*/\n"
+                # Replace the match with the replacement string
+                sql_string = sql_string.replace(f"{variable_name}{class_string}", replacement_string)
+                # Add the parameter expansion to the native SQL
+                native_sql += parameter_expansion
+                
+
+
+                classes[parameter_expansion] = (variable_name, class_name, module, is_wrapped, is_primitive_type)
+
+            print(classes)
+            print(native_sql)
+            print(sql_string)
             
+            native_sql += sql_string
+            
+
 
             sql_hash = hash(sql_string)
             sql_key = assign_name
@@ -153,57 +224,50 @@ class SQLTransformer(cst.CSTTransformer):
                 "sql_string": sql_string,
                 "native_sql": "",
                 "file_defined_in": self.filename,
-                "files_used_in": files_used_in,
-                "parameter_expansions": parameter_expansions,
-                "custom_model_imports": custom_model_imports
             }
             cache = None
             # Check if the sql_key is in the cache.json file
-            with open("cache.json", "r") as f:
-                text = f.read()
-                cache = json.loads(text)
-                # LOGGER.debug(f"Loaded cache: {cache}")
-                # Case 1: not a completely new invocation
-                if sql_key in cache:
-                    # LOGGER.debug(f"Cache for sql_key: {sql_key} exists:\n{cache[sql_key]}")
-                    # Case 2: Changed sql, New invocation should override old invocation
+            # with open("cache.json", "r") as f:
+            #     text = f.read()
+            #     cache = json.loads(text)
+            #     # LOGGER.debug(f"Loaded cache: {cache}")
+            #     # Case 1: not a completely new invocation
+            #     if sql_key in cache:
+            #         # LOGGER.debug(f"Cache for sql_key: {sql_key} exists:\n{cache[sql_key]}")
+            #         # Case 2: Changed sql, New invocation should override old invocation
 
-                    if cache[sql_key]["sql_string"] != sql_string:
-                        # LOGGER.debug(f"Case 2: Changed sql, New invocation should override old invocation")
-                        # LOGGER.critical(f"Warning! You are overriding an existing SQL invocation, which will regenerate the models. If you want to keep the old models with the same name, please change the variable name you are assinging to.")
-                        # Update the invocation_metadata in cache.json
-                        cache[sql_key] = invocation_metadata
-                    # Case 3: Unchanged invocation, maybe update files_used_in
-                    else:
-                        # LOGGER.debug(f"Case 3: Unchanged invocation, Do nothing")      
-                        target_files_used_in = cache[sql_key]["files_used_in"]
-                        # Case: File not already in files_used_in
-                        if self.filename not in target_files_used_in:
-                            cache[sql_key]["files_used_in"].append(self.filename)
-                        # Case: File already in files_used_in, duplicate invocation of same sql in same file
-                        else:
-                            pass
+            #         if cache[sql_key]["sql_string"] != sql_string:
+            #             # LOGGER.debug(f"Case 2: Changed sql, New invocation should override old invocation")
+            #             # LOGGER.critical(f"Warning! You are overriding an existing SQL invocation, which will regenerate the models. If you want to keep the old models with the same name, please change the variable name you are assinging to.")
+            #             # Update the invocation_metadata in cache.json
+            #             cache[sql_key] = invocation_metadata
+            #         # Case 3: Unchanged invocation, maybe update files_used_in
+            #         else:
+            #             # LOGGER.debug(f"Case 3: Unchanged invocation, Do nothing")      
+            #             target_files_used_in = cache[sql_key]["files_used_in"]
+            #             # Case: File not already in files_used_in
+            #             if self.filename not in target_files_used_in:
+            #                 cache[sql_key]["files_used_in"].append(self.filename)
+            #             # Case: File already in files_used_in, duplicate invocation of same sql in same file
+            #             else:
+            #                 pass
 
-                        return updated_node
-                # Case 4: Completely new invocation
-                else:
-                    # LOGGER.debug(f"Case 4: Completely new invocation")
-                    cache[sql_key] = invocation_metadata
+            #             return updated_node
+            #     # Case 4: Completely new invocation
+            #     else:
+            #         # LOGGER.debug(f"Case 4: Completely new invocation")
+            #         cache[sql_key] = invocation_metadata
 
-            native_sql = f"/* @name {sql_key} \n"
-            for expansion in parameter_expansions:
-                native_sql += expansion
-            native_sql += "*/\n"
-            native_sql += sql_string
             
             
-            cache[sql_key]["native_sql"] = native_sql
             
-            self.local_cache[sql_key] = invocation_metadata
+            # cache[sql_key]["native_sql"] = native_sql
+            
+            # self.local_cache[sql_key] = invocation_metadata
 
-            # LOGGER.info(f"Updated cache: {cache}")
-            with open("cache.json", "w") as f:
-                f.write(json.dumps(cache))
+            # # LOGGER.info(f"Updated cache: {cache}")
+            # with open("cache.json", "w") as f:
+            #     f.write(json.dumps(cache))
            
         return updated_node
     
@@ -405,7 +469,7 @@ def find_python_classes_in_sql(query: str):
                 class_fields = f"({class_fields}...)"
             expansion = f"@param {class_name} -> {class_fields}"
         elif is_list_bool:
-            
+
             expansion = f"@param {class_name} -> (...)"
         
 

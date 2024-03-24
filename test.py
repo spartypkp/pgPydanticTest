@@ -11,18 +11,28 @@ from model_library import Account
 # Look up snapshot testing, pyTest Snapshot
 
 def main():
-    # Make sure you run sql_transformer, and have config.py filled out.
     
-    fields = Account.model_fields.keys()
-    print(f"({', '.join(fields)})")
-    
-    
-    initialized_account = Account(name="Will", age=24, email="hire@me.com")
-    
-    sql_insert_account = f"INSERT INTO stupid_test_table (name, age, email) VALUES {Account};"
-    
-    sql_insert_accounts = f"INSERT INTO stupid_test_table (name, age, email) VALUES {[Account]};"
+    ### Automatic Parameter Expansions
+    # This is a demonstration of the automatic parameter expansions that the SQL transformer will perform.
+    # These expansions are based on the SQL comment syntax that the original pgtyped library uses for SQL files.
+    # Named parameters are required only for primitive types, pydantic models use the name of the model as the parameter name.
+
+    ## Array spread
+    # SQL comment syntax: @param paramName -> (...)
+    ages = [24, 25, 26]
+    sql_insert_basic = f"SELECT * FROM account_table WHERE age in ages{[int]}"
+    print(sql_insert_basic)
+
+    ## Object pick
+    # SQL comment syntax: @param paramName -> (name, age, email)
+    sql_insert_account = f"INSERT INTO account_table (name, age, email) VALUES {Account};"
     print(sql_insert_account)
+    
+
+    ## Array spread and pick
+    # SQL comment syntax: @param paramName -> ((name, age, email)...)
+    sql_insert_accounts = f"INSERT INTO account_table (name, age, email) VALUES {[Account]};"
+    
     print(sql_insert_accounts)
     exit(1)
     
