@@ -20,7 +20,7 @@ import psycopg
 from psycopg import sql as ps_sql
 from psycopg.types.json import Jsonb
 from psycopg.rows import class_row, dict_row
-from typing import List, Any, Optional, TypeVar, Callable, Union, get_args, get_origin, Dict
+from typing import List, Any, Optional, TypeVar, Callable, Union, get_args, get_origin, Dict, Type
 import pydantic
 from pydantic import BaseModel, computed_field
 import logging
@@ -146,7 +146,7 @@ class SQLTransformer(cst.CSTTransformer):
                                 module = importlib.import_module(module_name)
                                 class_type = getattr(module, class_name)
                                 
-                                field_representation = f"({', '.join(class_type.__fields__.keys())})"
+                                field_representation = col(class_type)
                                 parameter_expansion += field_representation
                                 if is_wrapped:
                                     parameter_expansion += "..."
@@ -203,8 +203,7 @@ class SQLTransformer(cst.CSTTransformer):
                 "query_name": assign_name,
                 "sql_string": sql_string,
                 "native_sql": native_sql,
-                "file_defined_in": self.filename,
-                "custom_model_imports": set()
+                "file_defined_in": self.filename
             }
             self.local_cache[sql_hash] = invocation_metadata
 
@@ -267,14 +266,11 @@ class SQLTransformer(cst.CSTTransformer):
         raw_errors = process.stderr.decode('utf-8')
         print(raw_errors)
         
-        #LOGGER.debug(f"Raw pgtyped-pydantic output: {raw_string}")
-        # LOGGER.debug(f"Raw pgtyped-pydantic errors: {raw_errors}")
+        
         updated_model_classes_raw = raw_string.replace("    ", "\t").split("### EOF ###")
-        # LOGGER.debug(f"Updated model classes: {updated_model_classes_raw}")
         updated_model_classes_raw.pop()
         updated_model_classes: List[cst.ClassDef] = []
         for i, model in enumerate(updated_model_classes_raw):
-            # LOGGER.debug(f"Model {i}: {model}")
             as_module = cst.parse_module(model)
             as_class = as_module.body[0]
             updated_model_classes.append(as_class)
@@ -382,8 +378,7 @@ def check_for_valid_sql_invocation(node: cst.Call) -> bool:
         return False
     # Ensure that the second argument is of type List[Expansion]
     
-    if len(args) == 2 and not m.matches(args[1].value.func, m.Name("ExpansionList")):
-        return False
+    
     
     return True
 
@@ -419,6 +414,13 @@ def analyze_formatted_string_expression(fse: cst.FormattedStringExpression):
                 break  # Assuming only one class name per list for this use case
 
     return class_name, is_wrapped_in_list
-    
+
+def col(model_type: Type[BaseModel]) -> str:
+    return f"({', '.join(model_type.__fields__.keys())})"
+
+def sql_executor():
+    pass
+    # Automatically handle safely inserting parameters into the SQL query, using pyscopg3's execute method
+
 if __name__ == "__main__":
     main()

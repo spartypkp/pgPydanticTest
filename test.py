@@ -1,7 +1,12 @@
 from test_models import SqlInsertAccount
 
+from test_models import SqlInsertAccount
+
+from test_models import SqlInsertAccount
+
 from pydantic import BaseModel
 from runtime import sql, db_connect
+from sql_transformer import col
 from typing import List, Annotated
 import libcst as cst
 from model_library import Account
@@ -28,9 +33,10 @@ def main():
     # ages = [24, 25, 26]
     # sql_insert_basic = sql(f"SELECT * FROM account_table WHERE age in ages{[int]}")
     # print(sql_insert_basic)      
-
+    
     ## Object pick
     # SQL comment syntax: @param paramName -> (name, age, email) dsflssd
+    
     sql_insert_account: SqlInsertAccount = sql(f"INSERT INTO account_table (name, age, email) VALUES {[Account]};")
     print(sql_insert_account) 
     

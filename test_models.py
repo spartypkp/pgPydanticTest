@@ -1,5 +1,9 @@
 from model_library import Account
 
+from model_library import Account
+
+from model_library import Account
+
 from typing import List, Optional, Dict, Any, Union
 import datetime
 from pydantic import BaseModel
@@ -7,8 +11,6 @@ from typing_extensions import NewType
 from psycopg.rows import class_row
 import psycopg
 from sql_transformer import sql_executor
-
-
 class SqlInsertAccount:
 	""" 
 	Class to hold all pydantic models for a single SQL query.
