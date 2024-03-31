@@ -234,31 +234,27 @@ class SQLTransformer(cst.CSTTransformer):
     
     def leave_Module(self, original_node: cst.Module, updated_node: cst.Module) -> cst.Module:
         
-        
+        # Create a temporary sql file to write the transformed SQL queries found in the parsed file
         converted_filename = self.filename_without_extension + "_temp.sql"
+        # If no SQL invocations were found in this file, exit
         if len(self.local_cache.keys()) == 0:
-            # LOGGER.info(f"No new or updated SQL invocations found in file.")
             return updated_node
+        
         with open(converted_filename, "w") as f:
             write_string = ""
             for k,v in self.local_cache.items():
                 write_string += v["native_sql"] + "\n\n"
-                
-                
-                
-            # LOGGER.debug(f"Writing to _temp.sql file: {write_string}")
             f.write(write_string)
         f.close()
+
         # Run pgtyped-pydantic to regenerate models
         cfg = 'config.json'
         file_override = converted_filename
-        
-        
+           
         # Running repository as python subprocess
         command = ['npx', 'pgtyped-pydantic', '-c', cfg, '-f', file_override]
         process = subprocess.run(command, capture_output=True)
        
-
         # Retrieve the updated models from process.stdout, convert to string
         raw_string = process.stdout.decode('utf-8')
         print(raw_string)
@@ -266,15 +262,17 @@ class SQLTransformer(cst.CSTTransformer):
         raw_errors = process.stderr.decode('utf-8')
         print(raw_errors)
         
-        
+        # Get all of the model_classes from pgtyped-pydantic as strings
         updated_model_classes_raw = raw_string.replace("    ", "\t").split("### EOF ###")
         updated_model_classes_raw.pop()
         updated_model_classes: List[cst.ClassDef] = []
+        # For each model_class, parse into a ClassDef
         for i, model in enumerate(updated_model_classes_raw):
             as_module = cst.parse_module(model)
             as_class = as_module.body[0]
             updated_model_classes.append(as_class)
 
+        # Create model imports, which import necessary pydantic models to the generated _models file
         custom_model_imports_str = ""
         for k,v in self.custom_imports.items():
             custom_model_imports_str += f"from {k} import {', '.join(v)}\n"
@@ -282,18 +280,19 @@ class SQLTransformer(cst.CSTTransformer):
         with open("config.json", "r") as f:
             config = json.load(f)
         f.close()
+
         output_mode = config["outputMode"]
         skip_model_transformer = False
-        # "default" Mode: Write the updated modesl to a new file, corresponding to each scanned file
+        # "default" Mode: Write the updated modesl to a new _models file, corresponding to each scanned file
         if output_mode != "monorepo":
-            # LOGGER.debug(f"Output mode: {output_mode}")
             output_filename = f"{self.filename_without_extension}_models"
             try:
+                # Read the original code
                 with open(f"{output_filename}.py", "r") as f:
                     source_code = f.read()
                 f.close()
+                # Add the new custom imports
                 source_code = custom_model_imports_str + "\n" + source_code
-                # LOGGER.debug(f"Retrieved source code from {output_filename}.py")
             except:
                 source_code = "from typing import List, Optional, Dict, Any, Union\nimport datetime\nfrom pydantic import BaseModel\nfrom typing_extensions import NewType\nfrom psycopg.rows import class_row\nimport psycopg\nfrom sql_transformer import sql_executor\n\n"
                 for mod in updated_model_classes_raw:
@@ -305,17 +304,15 @@ class SQLTransformer(cst.CSTTransformer):
                     f.write(source_code)
                 f.close()
                 skip_model_transformer = True
-                # LOGGER.debug(f"Created new file: {output_filename}.py. Wrote updated models to file. SKIPPING MODEL TRANSFORMER")
             
-
-        
         # "monorepo" Mode: Write the updated models to a single file, corresponding to all scanned files
         else:
             source_code = ""
+            # Read the single monorepo _models file to get source code
             with open("generated_models.py", "r") as file:
                 source_code = file.read()
             file.close()
-            # LOGGER.debug(f"Retrieved source code from generated_models.py")
+            
             output_filename = "generated_models"
         
         # Run the model transformer to update the already created _models file
@@ -328,9 +325,6 @@ class SQLTransformer(cst.CSTTransformer):
             updated_intermediate_tree = intermediate_tree.visit(model_transformer)
 
             updated_intermediate_tree = add_module(updated_model_classes, updated_intermediate_tree)
-
-            
-            #print(f"\n\n\n\nModified code:\n{modified_tree.code}")
             
             with open(f"{output_filename}.py", "w") as file:
                 file.write(updated_intermediate_tree.code)
@@ -340,8 +334,6 @@ class SQLTransformer(cst.CSTTransformer):
         # Regardless of output mode, update the imports in the scanned file
         names = []
         for k, v in self.local_cache.items():
-             
-            
             names.append(cst.ImportAlias(name=cst.Name(v["query_name"])))
             
         new_import = cst.ImportFrom(
@@ -351,7 +343,6 @@ class SQLTransformer(cst.CSTTransformer):
         # If nothing was added, return the original node
         if len(names) == 0:
             return original_node
-
 
         # Add a newline after the imports
         new_imports = [new_import, cst.EmptyLine(), cst.EmptyLine()]
