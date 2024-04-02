@@ -1,5 +1,4 @@
 
-from test_models import SqlInsertAccount
 
 from test_models import SqlInsertAccount
 
@@ -37,10 +36,9 @@ def main():
     # SQL comment syntax: @param paramName -> (name, age, email) dsflssd
     
     sql_insert_account: SqlInsertAccount = sql(f"INSERT INTO account_table (name, age, email) VALUES {[Account]};")
-    params = [Account(name="Will", age=25, email="hire@me.com")]
-    db_connection = db_connect()
-    result = sql_insert_account.run(params=params, connection=db_connection)
-    print(result)
+    
+   
+
     
 
     ## Array spread and pick   
